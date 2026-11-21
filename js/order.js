@@ -1,5 +1,5 @@
-import { gcashInfo, orderLimits } from "./config.js";
-import { ensureAnonymousCustomer, getPublicPriceData, uploadOrderFile, createCustomerOrder } from "./firebase.js";
+import { gcashInfo, orderLimits } from "./config.js?v=20261121b";
+import { ensureAnonymousCustomer, getPublicPriceData, uploadOrderFile, createCustomerOrder } from "./firebase.js?v=20261121b";
 
 const currency = new Intl.NumberFormat("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const files = [];
@@ -79,7 +79,6 @@ function renderFileList() {
   document.querySelector("#upload-next").disabled = files.length === 0;
 }
 
-dropZone.addEventListener("click", () => fileInput.click());
 dropZone.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fileInput.click(); } });
 ["dragenter","dragover"].forEach((name) => dropZone.addEventListener(name, (event) => { event.preventDefault(); dropZone.classList.add("is-dragging"); }));
 ["dragleave","drop"].forEach((name) => dropZone.addEventListener(name, (event) => { event.preventDefault(); dropZone.classList.remove("is-dragging"); }));

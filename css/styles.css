@@ -313,6 +313,7 @@ h1, h2, h3 { font-family: "Sora", sans-serif; letter-spacing: -.045em; }
 .drop-zone strong { font-family: "Sora",sans-serif; font-size: 14px; }
 .drop-zone span { color: #8995a3; font-size: 11px; }
 .drop-zone u { color: var(--blue); }
+.file-input-native { width: 1px; height: 1px; position: absolute; left: -9999px; overflow: hidden; }
 .form-message { min-height: 18px; margin-top: 10px; color: #b65c61; font-size: 11px; }
 .file-list { display: grid; gap: 8px; margin-top: 14px; }
 .upload-file { display: grid; grid-template-columns: 44px 1fr 34px; align-items: center; gap: 11px; padding: 11px; border: 1px solid #edf1f6; border-radius: 12px; }

@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css"><script type="module" src="js/order.js"></script>
+  <link rel="stylesheet" href="css/styles.css?v=20261121b"><script type="module" src="js/order.js?v=20261121b"></script>
 </head>
 <body>
   <header class="site-header"><nav class="nav-shell" aria-label="Main navigation">
@@ -26,7 +26,8 @@
       <section class="wizard-step" data-panel="1" aria-labelledby="upload-title">
         <h2 id="upload-title">Upload your files</h2>
         <p class="step-copy">Add up to 10 files, 25 MB each. We accept PDF, Word, Excel, PowerPoint, images, and text files.</p>
-        <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="Browse or drop files"><div class="drop-icon">↑</div><strong>Drop files here</strong><span>or <u>Browse files</u></span><input id="file-input" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt" hidden></div>
+        <label id="drop-zone" class="drop-zone" for="file-input" aria-label="Drop files or browse for files"><div class="drop-icon">↑</div><strong>Drop files here</strong><span>or <u>Browse files</u></span></label>
+        <input id="file-input" class="file-input-native" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt">
         <div id="upload-error" class="form-message error" role="alert"></div><div id="file-list" class="file-list"></div>
         <div class="step-actions"><button id="upload-next" class="button button-gradient" type="button" disabled>Continue to preview →</button></div>
       </section>
