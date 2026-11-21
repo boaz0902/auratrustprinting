@@ -1,17 +1,16 @@
-import { adminEmail } from "./config.js";
+import { isSupabaseConfigured } from "./supabase.js";
 import {
+  deleteOldOrderFiles,
+  getAllOrders,
   getAllServices,
-  isAdminEmailConfigured,
-  isFirebaseConfigured,
+  getSignedUrl,
   observeAuth,
   removeService,
   saveService,
   signInAdmin,
   signOutAdmin,
-  observeAllOrders,
-  updateOrderStatus,
-  getDownloadUrl
-} from "./firebase.js";
+  updateOrderStatus
+} from "./supabase.js";
 
 const loginView = document.querySelector("#login-view");
 const dashboardView = document.querySelector("#dashboard-view");
@@ -22,7 +21,9 @@ const serviceForm = document.querySelector("#service-form");
 const tableBody = document.querySelector("#services-table-body");
 const toast = document.querySelector("#toast");
 const currency = new Intl.NumberFormat("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const statuses = ["Received", "Payment Checking", "Paid", "Printing", "Ready for Pickup", "Completed"];
 let services = [];
+let orders = [];
 let toastTimeout;
 
 function escapeHtml(value = "") {
@@ -71,7 +72,7 @@ function renderServices() {
 }
 
 async function loadServices() {
-  showMessage(dashboardStatus, "Loading services…");
+  showMessage(dashboardStatus, "Loading prices…");
   try {
     services = await getAllServices();
     showMessage(dashboardStatus, "");
@@ -79,7 +80,7 @@ async function loadServices() {
     return true;
   } catch (error) {
     console.error("Unable to load services.", error);
-    showMessage(dashboardStatus, "Could not load services. Check your connection and Firestore rules, then refresh.", true);
+    showMessage(dashboardStatus, "Could not load prices. Check the Supabase services table and row-level security, then refresh.", true);
     return false;
   }
 }
@@ -93,7 +94,7 @@ function startEditing(serviceId) {
   serviceForm.elements.description.value = service.description || "";
   serviceForm.elements.unit.value = service.unit || "";
   serviceForm.elements.price.value = service.price ?? "";
-  serviceForm.elements.sortOrder.value = Number(service.sortOrder || 0);
+  serviceForm.elements.sortOrder.value = Number(service.sort_order || 0);
   serviceForm.elements.variants.value = (service.variants || [])
     .map((variant) => `${variant.label} | ${variant.price}`).join("\n");
   serviceForm.elements.popular.checked = Boolean(service.popular);
@@ -132,7 +133,6 @@ function readFormValues() {
   }
   const sortOrder = Number(form.sortOrder.value);
   if (!Number.isInteger(sortOrder)) throw new Error("Sort order must be a whole number.");
-
   return {
     name: form.name.value.trim(),
     category: form.category.value.trim(),
@@ -142,7 +142,7 @@ function readFormValues() {
     variants,
     popular: form.popular.checked,
     visible: form.visible.checked,
-    sortOrder
+    sort_order: sortOrder
   };
 }
 
@@ -155,7 +155,7 @@ loginForm.addEventListener("submit", async (event) => {
     await signInAdmin(loginForm.elements.email.value.trim(), loginForm.elements.password.value);
   } catch (error) {
     console.error("Admin sign-in failed.", error);
-    showMessage(loginStatus, "Sign-in failed. Check your email and password, and confirm the admin account is enabled.", true);
+    showMessage(loginStatus, "Sign-in failed. Check your email and password and confirm the account is enabled in Supabase Auth.", true);
   } finally {
     button.disabled = false;
   }
@@ -169,10 +169,10 @@ serviceForm.addEventListener("submit", async (event) => {
     await saveService(serviceForm.elements.serviceId.value || null, readFormValues());
     resetForm();
     const refreshed = await loadServices();
-    showToast(refreshed ? "Service saved." : "Service saved, but the list could not refresh. Use Refresh list to try again.", !refreshed);
+    showToast(refreshed ? "Price saved." : "Price saved, but the list could not refresh. Use Refresh list to try again.", !refreshed);
   } catch (error) {
     console.error("Unable to save service.", error);
-    showToast(error.message || "Could not save this service. Check the form and Firestore rules.", true);
+    showToast(error.message || "Could not save this price. Check the form and Supabase row-level security.", true);
   } finally {
     button.disabled = false;
   }
@@ -192,10 +192,10 @@ tableBody.addEventListener("click", async (event) => {
   try {
     await removeService(service.id);
     const refreshed = await loadServices();
-    showToast(refreshed ? "Service deleted." : "Service deleted, but the list could not refresh. Use Refresh list to try again.", !refreshed);
+    showToast(refreshed ? "Price deleted." : "Price deleted, but the list could not refresh.", !refreshed);
   } catch (error) {
     console.error("Unable to delete service.", error);
-    showToast("Could not delete this service. Check your connection and Firestore rules.", true);
+    showToast("Could not delete this price. Check your connection and Supabase row-level security.", true);
   } finally {
     deleteButton.disabled = false;
   }
@@ -219,110 +219,131 @@ function showLogin(message = "") {
   if (message) showMessage(loginStatus, message, true);
 }
 
-function isConfiguredAdmin(user) {
-  return isAdminEmailConfigured()
-    && typeof user.email === "string"
-    && user.email.trim().toLowerCase() === adminEmail.trim().toLowerCase();
-}
-
-async function handleAuthState(user) {
-  if (!user) {
-    showLogin();
-    return;
-  }
-  if (!isConfiguredAdmin(user)) {
-    const signedInAs = user.email || "an account without an email address";
-    const expected = isAdminEmailConfigured()
-      ? ` The configured admin email is ${adminEmail}.`
-      : " The admin email is not configured in js/config.js.";
-    console.warn("Admin access denied by the client email check.", {
-      signedInEmail: user.email,
-      configuredAdminEmail: adminEmail
-    });
-    await signOutAdmin();
-    showLogin(`You are signed in as ${signedInAs}, which does not match the admin account.${expected} Check the account and deployed configuration.`);
-    return;
-  }
-  loginView.hidden = true;
-  dashboardView.hidden = false;
-  document.querySelector("#admin-email-label").textContent = user.email;
-  await loadServices();
-}
-
-if (!isFirebaseConfigured() || !isAdminEmailConfigured()) {
-  showMessage(loginStatus, "Before signing in, configure your Firebase web app settings and admin email in js/config.js.", true);
-  loginForm.querySelector("button[type=submit]").disabled = true;
-} else {
-  observeAuth((user) => {
-    handleAuthState(user).catch((error) => {
-      console.error("Unable to initialize the admin dashboard.", error);
-      showLogin("Could not open the admin dashboard. Check your Firebase settings and Firestore rules.");
-    });
-  }, (error) => {
-    console.error("Unable to observe admin authentication state.", error);
-    showLogin("Could not check the current sign-in. Reload the page and try again.");
-  }).catch((error) => {
-    console.error("Firebase admin initialization failed.", error);
-    showMessage(loginStatus, "Could not connect to Firebase. Check your configuration and network connection.", true);
-  });
-}
-
-let allOrders = [];
-const orderList = document.querySelector("#orders-list");
-const statusFilter = document.querySelector("#order-status-filter");
-
 function formatOrderDate(value) {
-  const date = value && typeof value.toDate === "function" ? value.toDate() : null;
-  return date ? new Intl.DateTimeFormat("en-PH",{dateStyle:"medium",timeStyle:"short"}).format(date) : "Just now";
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime())
+    ? new Intl.DateTimeFormat("en-PH", { dateStyle: "medium", timeStyle: "short" }).format(date)
+    : "Date unavailable";
 }
 
 function renderOrders() {
-  const filter = statusFilter.value;
-  const filtered = filter === "All" ? allOrders : allOrders.filter((order) => order.status === filter);
+  const filter = document.querySelector("#order-status-filter").value;
+  const filtered = filter === "All" ? orders : orders.filter((order) => order.status === filter);
+  const orderList = document.querySelector("#orders-list");
   if (!filtered.length) {
     orderList.innerHTML = '<div class="table-empty">No orders match this view.</div>';
     return;
   }
   orderList.innerHTML = filtered.map((order) => `
     <article class="order-card">
-      <div class="order-card-head"><div><h3>${escapeHtml(order.orderNumber)}</h3><p class="order-card-meta">${escapeHtml(order.customerName)} · ${escapeHtml(order.mobile)} · ${escapeHtml(order.pickupOrDelivery)} · ${escapeHtml(formatOrderDate(order.createdAt))}</p></div><select class="order-status-select" data-order-status="${escapeHtml(order.id)}" aria-label="Change status">${["Received","Payment Checking","Paid","Printing","Ready for Pickup","Completed"].map((status)=>`<option ${status===order.status?"selected":""}>${status}</option>`).join("")}</select></div>
-      <div class="order-items">${(order.items || []).map((item)=>`<div class="order-item-row"><strong>${escapeHtml(item.fileName)}</strong><span>${escapeHtml(item.options?.service || "Service")} · ${escapeHtml(item.options?.paper || "A4")} · ${escapeHtml(item.options?.copies || 1)} copy · ${escapeHtml(item.options?.color || "")} · ${escapeHtml(item.options?.pages || "All")}</span><button class="text-button" type="button" data-open-file="${escapeHtml(item.storagePath)}">Open / download</button></div>`).join("")}</div>
-      <p class="order-card-meta">GCash ref: ${escapeHtml(order.gcashRef)} · Estimated total: ₱${currency.format(Number(order.estimatedTotal || 0))}</p>
-      <div class="order-admin-actions"><button class="button button-outline" type="button" data-open-receipt="${escapeHtml(order.receiptPath)}">View receipt</button><button class="button button-gradient" type="button" data-verify-payment="${escapeHtml(order.id)}" ${order.paymentVerified?"disabled":""}>${order.paymentVerified?"Payment verified":"Mark Payment as Verified"}</button></div>
+      <div class="order-card-head">
+        <div><h3>${escapeHtml(order.order_number)}</h3><p class="order-card-meta">${escapeHtml(order.customer_name)} · ${escapeHtml(order.mobile)} · ${escapeHtml(order.pickup_or_delivery)} · ${escapeHtml(formatOrderDate(order.created_at))}</p></div>
+        <label class="sr-only" for="status-${escapeHtml(order.id)}">Order status</label>
+        <select id="status-${escapeHtml(order.id)}" class="order-status-select" data-order-status="${escapeHtml(order.id)}" aria-label="Change status for ${escapeHtml(order.order_number)}">${statuses.map((status) => `<option ${status === order.status ? "selected" : ""}>${status}</option>`).join("")}</select>
+      </div>
+      <div class="order-items">${(Array.isArray(order.items) ? order.items : []).map((item) => `
+        <div class="order-item-row"><strong>${escapeHtml(item.fileName || "Order file")}</strong><span>${escapeHtml(item.options?.service || "Service")} · ${escapeHtml(item.options?.paper || "A4")} · ${escapeHtml(item.options?.copies || 1)} copy · ${escapeHtml(item.options?.color || "")} · ${escapeHtml(item.options?.pages || "All")}</span>
+        ${item.storagePath ? `<button class="text-button" type="button" data-open-file="${escapeHtml(item.storagePath)}">Open / download</button>` : "<span>File removed</span>"}</div>
+      `).join("")}</div>
+      <p class="order-card-meta">GCash ref: ${escapeHtml(order.gcash_ref)} · Estimated total: ₱${currency.format(Number(order.estimated_total || 0))}</p>
+      ${order.receipt_path ? `<div class="order-admin-actions"><button class="button button-outline" type="button" data-open-receipt="${escapeHtml(order.receipt_path)}">View receipt</button></div>` : '<p class="order-card-meta">Receipt file removed.</p>'}
     </article>
   `).join("");
 }
 
-document.querySelectorAll("[data-admin-tab]").forEach((tab) => tab.addEventListener("click", () => {
-  document.querySelectorAll("[data-admin-tab]").forEach((item)=>item.classList.toggle("active",item===tab));
-  document.querySelectorAll("[data-admin-panel]").forEach((panel)=>panel.hidden=panel.dataset.adminPanel!==tab.dataset.adminTab);
-}));
-statusFilter.addEventListener("change", renderOrders);
-orderList.addEventListener("change", async (event) => {
-  const select = event.target.closest("[data-order-status]");
-  if (!select) return;
-  try { await updateOrderStatus(select.dataset.orderStatus, select.value); showToast("Order status updated."); }
-  catch (error) { console.error(error); showToast("Could not update order status.",true); }
-});
-orderList.addEventListener("click", async (event) => {
-  const fileButton = event.target.closest("[data-open-file]");
-  const receiptButton = event.target.closest("[data-open-receipt]");
-  const verifyButton = event.target.closest("[data-verify-payment]");
+async function loadOrders() {
   try {
-    if (fileButton) window.open(await getDownloadUrl(fileButton.dataset.openFile), "_blank","noopener");
-    if (receiptButton) window.open(await getDownloadUrl(receiptButton.dataset.openReceipt), "_blank","noopener");
-    if (verifyButton) {
-      await updateOrderStatus(verifyButton.dataset.verifyPayment, "Payment Checking", true);
-      showToast("Payment marked as verified.");
+    orders = await getAllOrders();
+    renderOrders();
+  } catch (error) {
+    console.error("Unable to load orders.", error);
+    showToast("Could not load orders. Check the Supabase orders policies.", true);
+  }
+}
+
+if (!isSupabaseConfigured()) {
+  showMessage(loginStatus, "Before signing in, configure your Supabase project URL and anon key in js/config.js.", true);
+  loginForm.querySelector("button[type=submit]").disabled = true;
+} else {
+  observeAuth(async (user) => {
+    if (!user || user.is_anonymous) {
+      showLogin();
+      return;
     }
-  } catch (error) { console.error(error); showToast("Could not open or update this order.",true); }
+    loginView.hidden = true;
+    dashboardView.hidden = false;
+    document.querySelector("#admin-email-label").textContent = user.email || "Signed in";
+    await loadServices();
+    await loadOrders();
+  }, (error) => {
+    console.error("Unable to observe Supabase authentication state.", error);
+    showLogin("Could not check the current sign-in. Reload the page and try again.");
+  }).catch((error) => {
+    console.error("Supabase admin initialization failed.", error);
+    showMessage(loginStatus, "Could not connect to Supabase. Check your configuration and network connection.", true);
+  });
+}
+
+document.querySelectorAll("[data-admin-tab]").forEach((tab) => tab.addEventListener("click", () => {
+  document.querySelectorAll("[data-admin-tab]").forEach((item) => {
+    item.classList.toggle("active", item === tab);
+    item.setAttribute("aria-selected", String(item === tab));
+  });
+  document.querySelectorAll("[data-admin-panel]").forEach((panel) => { panel.hidden = panel.dataset.adminPanel !== tab.dataset.adminTab; });
+  if (tab.dataset.adminTab === "orders") loadOrders();
+}));
+
+document.querySelector("#order-status-filter").addEventListener("change", renderOrders);
+document.querySelector("#refresh-orders").addEventListener("click", loadOrders);
+document.querySelector("#delete-old-files").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  if (!window.confirm("Delete order files from orders older than 30 days? This cannot be undone.")) return;
+  button.disabled = true;
+  try {
+    const result = await deleteOldOrderFiles(orders);
+    showToast(`Removed ${result.files} file(s) from ${result.orders} old order(s).`);
+    await loadOrders();
+  } catch (error) {
+    console.error("Unable to delete old order files.", error);
+    showToast("Could not finish file cleanup. Check storage and orders row-level security.", true);
+  } finally {
+    button.disabled = false;
+  }
 });
 
-observeAuth(async (user) => {
-  if (user && isConfiguredAdmin(user)) {
-    observeAllOrders((orders) => { allOrders = orders; renderOrders(); }, (error) => {
-      console.error("Unable to observe orders.",error);
-      showToast("Could not load live orders.",true);
-    });
+document.querySelector("#orders-list").addEventListener("change", async (event) => {
+  const select = event.target.closest("[data-order-status]");
+  if (!select) return;
+  try {
+    await updateOrderStatus(select.dataset.orderStatus, select.value);
+    const order = orders.find((item) => item.id === select.dataset.orderStatus);
+    if (order) order.status = select.value;
+    renderOrders();
+    showToast("Order status updated.");
+  } catch (error) {
+    console.error("Unable to update order status.", error);
+    showToast("Could not update order status.", true);
+    await loadOrders();
   }
-}).catch(()=>{});
+});
+
+document.querySelector("#orders-list").addEventListener("click", async (event) => {
+  const fileButton = event.target.closest("[data-open-file]");
+  const receiptButton = event.target.closest("[data-open-receipt]");
+  const button = fileButton || receiptButton;
+  if (!button) return;
+  button.disabled = true;
+  const popup = window.open("about:blank", "_blank");
+  if (popup) popup.opener = null;
+  try {
+    const url = await getSignedUrl(button.dataset.openFile || button.dataset.openReceipt);
+    if (!popup) throw new Error("The browser blocked the new tab.");
+    popup.location.href = url;
+  } catch (error) {
+    popup?.close();
+    console.error("Unable to create a signed file URL.", error);
+    showToast(popup ? "Could not open this file. It may have been removed or your storage access was denied." : "Allow pop-ups to open order files.", true);
+  } finally {
+    button.disabled = false;
+  }
+});

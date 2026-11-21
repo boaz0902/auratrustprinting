@@ -1,5 +1,7 @@
-// Public business details and Firebase web configuration live here.
-// Replace the Firebase placeholders with the values from your Firebase project.
+// Public browser configuration only. Never put a Supabase service-role key here.
+export const SUPABASE_URL = "https://gzyluszzrrlhqcwoilfr.supabase.co";
+export const SUPABASE_ANON_KEY = "sb_publishable_T22ecdd7VLf91L8TqN4jug_N9AQea2m";
+
 export const businessInfo = {
   address: "Add your shop address",
   phone: "+63 900 000 0000",
@@ -33,15 +35,3 @@ export const orderLimits = {
     "text/plain"
   ]
 };
-
-export const firebaseConfig = {
-  apiKey: "AIzaSyAH5ycJgbT6gYvJ6YsizLLijbHIgZxAb-c",
-  authDomain: "printer-2202d.firebaseapp.com",
-  projectId: "printer-2202d",
-  storageBucket: "printer-2202d.firebasestorage.app",
-  messagingSenderId: "524759267518",
-  appId: "1:524759267518:web:13223221aacb39aa9b86ef",
-  measurementId: "G-RZHPS812ZG"
-};
-
-export const adminEmail = "auratrustprinting@gmail.com";

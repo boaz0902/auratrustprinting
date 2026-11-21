@@ -1,6 +1,6 @@
 import { businessInfo } from "./config.js";
 import { sampleServices } from "./sample-data.js";
-import { getPublicPriceData, isFirebaseConfigured } from "./firebase.js";
+import { getPublicPriceData, isSupabaseConfigured } from "./supabase.js";
 
 const categoryTabs = document.querySelector("#category-tabs");
 const categoryContainer = document.querySelector("#price-categories");
@@ -65,7 +65,7 @@ function renderPrices() {
     : [selectedCategory];
   categoryContainer.innerHTML = categories.map((category) => {
     const categoryServices = filtered.filter((service) => service.category === category)
-      .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
+      .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
     if (!categoryServices.length) return "";
     return `<section class="category-section" aria-label="${escapeHtml(category)}">
       <h3 class="category-title">${escapeHtml(category)}</h3>
@@ -75,15 +75,15 @@ function renderPrices() {
 }
 
 function formatUpdatedDate(value) {
-  const date = value instanceof Date ? value : value && typeof value.toDate === "function" ? value.toDate() : null;
+  const date = value ? new Date(value) : null;
   return date && !Number.isNaN(date.getTime())
     ? new Intl.DateTimeFormat("en-PH", { year: "numeric", month: "long", day: "numeric" }).format(date)
     : "Date unavailable";
 }
 
 async function loadPrices() {
-  if (!isFirebaseConfigured()) {
-    statusMessage.textContent = "Showing sample prices. Please message AuraTrust to confirm current rates.";
+  if (!isSupabaseConfigured()) {
+    statusMessage.textContent = "Supabase is not configured. Showing sample prices; please message AuraTrust to confirm current rates.";
     renderTabs();
     renderPrices();
     return;
@@ -100,7 +100,7 @@ async function loadPrices() {
       statusMessage.textContent = "Our live price list is being updated. This sample guide is for reference—please message us to confirm current rates.";
     }
   } catch (error) {
-    console.error("Unable to load public prices from Firestore.", error);
+    console.error("Unable to load public prices from Supabase.", error);
     services = sampleServices.filter((service) => service.visible);
     statusMessage.textContent = "Live prices are temporarily unavailable. This sample guide is for reference—please message us to confirm current rates.";
     statusMessage.classList.add("error");

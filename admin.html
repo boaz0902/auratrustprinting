@@ -58,8 +58,8 @@
           <div class="dashboard-account"><span id="admin-email-label"></span><button id="logout-button" class="button button-outline" type="button">Log out</button></div>
         </div>
         <div id="dashboard-status" class="admin-message" role="status" aria-live="polite"></div>
-        <div class="admin-tabs" role="tablist"><button class="admin-tab active" type="button" data-admin-tab="services">Services</button><button class="admin-tab" type="button" data-admin-tab="orders">Orders</button></div>
-        <div data-admin-panel="services">
+        <div class="admin-tabs" role="tablist" aria-label="Admin sections"><button id="prices-tab" class="admin-tab active" type="button" role="tab" aria-selected="true" aria-controls="prices-panel" data-admin-tab="services">Prices</button><button id="orders-tab" class="admin-tab" type="button" role="tab" aria-selected="false" aria-controls="orders-panel" data-admin-tab="orders">Orders</button></div>
+        <div id="prices-panel" role="tabpanel" aria-labelledby="prices-tab" data-admin-panel="services">
         <section class="service-editor" aria-labelledby="editor-title">
           <div class="editor-heading"><div><p class="admin-kicker">Service details</p><h2 id="editor-title">Add a service</h2></div><button id="cancel-edit" class="text-button" type="button" hidden>Cancel edit</button></div>
           <form id="service-form">
@@ -92,8 +92,8 @@
           </div>
         </section>
         </div>
-        <section data-admin-panel="orders" hidden>
-          <div class="service-manager"><div class="orders-toolbar"><div><p class="admin-kicker">Live customer orders</p><h2>All orders</h2></div><label>Status <select id="order-status-filter"><option value="All">All</option><option>Received</option><option>Payment Checking</option><option>Paid</option><option>Printing</option><option>Ready for Pickup</option><option>Completed</option></select></label></div><div id="orders-list"></div></div>
+        <section id="orders-panel" role="tabpanel" aria-labelledby="orders-tab" data-admin-panel="orders" hidden>
+          <div class="service-manager"><div class="orders-toolbar"><div><p class="admin-kicker">Customer orders</p><h2>All orders</h2></div><div class="orders-controls"><label>Status <select id="order-status-filter"><option value="All">All</option><option>Received</option><option>Payment Checking</option><option>Paid</option><option>Printing</option><option>Ready for Pickup</option><option>Completed</option></select></label><button id="refresh-orders" class="button button-outline" type="button">Refresh orders</button><button id="delete-old-files" class="button button-outline danger-button" type="button">Delete files older than 30 days</button></div></div><div id="orders-list"></div></div>
         </section>
       </section>
     </main>
