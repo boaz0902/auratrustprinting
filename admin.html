@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="theme-color" content="#ffffff">
+    <title>Owner Admin | AuraTrust Printing & Digital Services</title>
+    <link rel="icon" type="image/png" href="assets/logos2.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      tailwind = {
+        config: {
+          theme: {
+            extend: {
+              colors: {
+                brand: { blue: "#2F6FED", indigo: "#3B3FD1", aqua: "#8FE0E3", slate: "#38434E", paper: "#F6F9FE" }
+              },
+              fontFamily: { heading: ["Sora", "sans-serif"], sans: ["Inter", "sans-serif"] }
+            }
+          }
+        }
+      };
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="css/styles.css">
+    <script type="module" src="js/admin.js"></script>
+  </head>
+  <body class="admin-body">
+    <header class="site-header">
+      <nav class="nav-shell admin-nav" aria-label="Admin navigation">
+        <a class="brand-lockup" href="index.html" aria-label="AuraTrust public price list">
+          <span class="brand-mark-crop"><img src="assets/logos2.png" alt=""></span>
+          <span class="brand-wordmark"><strong>AURATRUST</strong><small>PRINTING &amp; DIGITAL SERVICES</small></span>
+        </a>
+        <a class="admin-back-link" href="index.html">← Back to price list</a>
+      </nav>
+    </header>
+    <main class="admin-main">
+      <section id="login-view" class="login-panel" aria-labelledby="login-title">
+        <div class="admin-kicker">AuraTrust · Owner access</div>
+        <h1 id="login-title">Welcome back.</h1>
+        <p class="login-copy">Sign in to manage your public price list.</p>
+        <div id="login-status" class="admin-message" role="status" aria-live="polite"></div>
+        <form id="login-form">
+          <label class="admin-field"><span>Email address</span><input name="email" type="email" autocomplete="username" required></label>
+          <label class="admin-field"><span>Password</span><input name="password" type="password" autocomplete="current-password" required></label>
+          <button class="button button-gradient admin-submit" type="submit">Sign in <span aria-hidden="true">→</span></button>
+        </form>
+        <p class="admin-security-note">This area is for authorized AuraTrust administrators only.</p>
+      </section>
+
+      <section id="dashboard-view" class="admin-dashboard" hidden aria-labelledby="dashboard-title">
+        <div class="dashboard-topbar">
+          <div><p class="eyebrow">AuraTrust · Price manager</p><h1 id="dashboard-title">Your services.</h1></div>
+          <div class="dashboard-account"><span id="admin-email-label"></span><button id="logout-button" class="button button-outline" type="button">Log out</button></div>
+        </div>
+        <div id="dashboard-status" class="admin-message" role="status" aria-live="polite"></div>
+        <div class="admin-tabs" role="tablist"><button class="admin-tab active" type="button" data-admin-tab="services">Services</button><button class="admin-tab" type="button" data-admin-tab="orders">Orders</button></div>
+        <div data-admin-panel="services">
+        <section class="service-editor" aria-labelledby="editor-title">
+          <div class="editor-heading"><div><p class="admin-kicker">Service details</p><h2 id="editor-title">Add a service</h2></div><button id="cancel-edit" class="text-button" type="button" hidden>Cancel edit</button></div>
+          <form id="service-form">
+            <input name="serviceId" type="hidden">
+            <div class="admin-form-grid">
+              <label class="admin-field"><span>Service name</span><input name="name" maxlength="100" required></label>
+              <label class="admin-field"><span>Category</span><input name="category" maxlength="80" placeholder="e.g. Documents & Photocopy" required></label>
+              <label class="admin-field field-wide"><span>Short description</span><input name="description" maxlength="180" required></label>
+              <label class="admin-field"><span>Unit</span><input name="unit" maxlength="40" placeholder="per page / per sq. ft." required></label>
+              <label class="admin-field"><span>Single price (₱)</span><input name="price" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Leave blank when using variants"></label>
+              <label class="admin-field"><span>Sort order</span><input name="sortOrder" type="number" step="1" value="0" required></label>
+              <label class="admin-field field-wide"><span>Price variants (optional)</span><textarea name="variants" rows="4" placeholder="Short (8.5 × 11 in) | 3.00&#10;A4 | 3.00"></textarea><small>One per line, in the format: label | price</small></label>
+              <div class="admin-checks field-wide">
+                <label><input name="popular" type="checkbox"> Popular</label>
+                <label><input name="visible" type="checkbox" checked> Visible on public price list</label>
+              </div>
+            </div>
+            <button id="save-service" class="button button-gradient admin-submit" type="submit">Save service <span aria-hidden="true">→</span></button>
+          </form>
+        </section>
+
+        <section class="service-manager" aria-labelledby="service-list-title">
+          <div class="service-list-heading"><div><p class="admin-kicker">Your price list</p><h2 id="service-list-title">All services <span id="service-count"></span></h2></div><button id="refresh-services" class="button button-outline" type="button">Refresh list</button></div>
+          <div class="admin-table-wrap">
+            <table class="admin-table">
+              <thead><tr><th scope="col">Service</th><th scope="col">Category</th><th scope="col">Price</th><th scope="col">Visibility</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+              <tbody id="services-table-body"></tbody>
+            </table>
+            <div id="table-empty" class="table-empty" hidden>No services yet. Add your first service above.</div>
+          </div>
+        </section>
+        </div>
+        <section data-admin-panel="orders" hidden>
+          <div class="service-manager"><div class="orders-toolbar"><div><p class="admin-kicker">Live customer orders</p><h2>All orders</h2></div><label>Status <select id="order-status-filter"><option value="All">All</option><option>Received</option><option>Payment Checking</option><option>Paid</option><option>Printing</option><option>Ready for Pickup</option><option>Completed</option></select></label></div><div id="orders-list"></div></div>
+        </section>
+      </section>
+    </main>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

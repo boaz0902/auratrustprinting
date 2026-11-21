@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="description" content="Explore the transparent price list for AuraTrust Printing & Digital Services. Quality printing, fair prices, and friendly local service in the Philippines.">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="AuraTrust Printing & Digital Services | Price List">
+    <meta property="og:description" content="Premium printing. Transparent prices. Find your next print service and its price.">
+    <meta property="og:image" content="assets/logos2.png">
+    <title>Price List | AuraTrust Printing & Digital Services</title>
+    <link rel="icon" type="image/png" href="assets/logos2.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      tailwind = {
+        config: {
+          theme: {
+            extend: {
+              colors: {
+                brand: { blue: "#2F6FED", indigo: "#3B3FD1", aqua: "#8FE0E3", slate: "#38434E", paper: "#F6F9FE" }
+              },
+              fontFamily: { heading: ["Sora", "sans-serif"], sans: ["Inter", "sans-serif"] }
+            }
+          }
+        }
+      };
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="css/styles.css">
+    <script type="module" src="js/app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="nav-shell" aria-label="Main navigation">
+        <a class="brand-lockup" href="#" aria-label="AuraTrust home">
+          <span class="brand-mark-crop"><img src="assets/logos2.png" alt=""></span>
+          <span class="brand-wordmark"><strong>AURATRUST</strong><small>PRINTING &amp; DIGITAL SERVICES</small></span>
+        </a>
+        <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-nav" aria-label="Open navigation">
+          <span></span><span></span>
+        </button>
+        <div class="nav-links" id="primary-nav">
+          <a href="#prices">Prices</a>
+          <a href="order.html">Place an Order</a>
+          <a href="track.html">Track Order</a>
+          <a href="#why-us">Why Us</a>
+          <a href="#contact">Contact</a>
+          <a class="button button-small button-gradient" data-contact-link href="#contact">Message Us <span aria-hidden="true">↗</span></a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero section-wrap" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="eyebrow-dot"></span> Your ideas, beautifully printed</p>
+          <h1 id="hero-title">Premium Printing.<br><span class="text-gradient">Transparent Prices.</span></h1>
+          <p class="hero-lede">From everyday documents to the details that make your brand shine — discover thoughtful print work at a price that feels right.</p>
+          <div class="hero-actions">
+            <a class="button button-gradient" href="#prices">View Price List <span aria-hidden="true">↓</span></a>
+            <a class="button button-outline" data-contact-link href="#contact">Contact Us <span aria-hidden="true">↗</span></a>
+          </div>
+          <div class="hero-proof"><span class="proof-stars" aria-hidden="true">★★★★★</span><span>Made with care. Priced with clarity.</span></div>
+        </div>
+        <div class="hero-art" aria-hidden="true">
+          <div class="art-glow"></div>
+          <div class="hero-mark-window"><img class="hero-mark-image" src="assets/logos2.png" alt="" width="1222" height="864"></div>
+          <div class="art-note"><span class="note-icon">✳</span><span><strong>Good things</strong><br>start on paper.</span></div>
+          <div class="art-index">A<span>—</span>01</div>
+        </div>
+        <div class="hero-bottom">
+          <span>LOCAL PRINTING, MADE PERSONAL</span>
+          <span class="hero-rule"></span>
+          <span>PHILIPPINES · EST. WITH CARE</span>
+        </div>
+      </section>
+
+      <section class="prices-section" id="prices" aria-labelledby="prices-title">
+        <div class="section-wrap">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">The price list</p>
+              <h2 id="prices-title">Good work, <span class="text-gradient">clear prices.</span></h2>
+              <p class="section-subtitle">A little something for every idea. Find the service you need and see what it costs.</p>
+            </div>
+            <div class="price-stamp" aria-label="Straightforward pricing"><span>₱</span><small>NO GUESSWORK<br>JUST GOOD PRINTS</small></div>
+          </div>
+
+          <div class="price-tools">
+            <label class="search-box">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 4.2 4.2"></path></svg>
+              <span class="sr-only">Search services</span>
+              <input id="service-search" type="search" placeholder="Search a service..." autocomplete="off">
+              <kbd>/</kbd>
+            </label>
+            <div id="category-tabs" class="category-tabs" role="group" aria-label="Filter by category"></div>
+          </div>
+          <div id="prices-status" class="status-message" role="status" aria-live="polite"></div>
+          <div id="price-categories" class="price-categories" aria-live="polite">
+            <div class="skeleton-grid" aria-label="Loading prices">
+              <div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>
+            </div>
+          </div>
+          <div class="prices-footnote">
+            <p id="last-updated">Prices last updated: <span>Sample list</span></p>
+            <p>Prices may change without prior notice. Message us for bulk or custom orders.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="why-section section-wrap" id="why-us" aria-labelledby="why-title">
+        <div class="why-intro">
+          <p class="eyebrow">The AuraTrust difference</p>
+          <h2 id="why-title">Small details.<br><span class="text-gradient">A big difference.</span></h2>
+          <p>We believe print should feel as good as it looks — with quality you can count on and a team that cares about getting it right.</p>
+        </div>
+        <div class="benefit-grid">
+          <article class="benefit-card"><span class="benefit-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 2.2 5.1L20 10l-4.1 3.2.3 5.9-4.2-3.1-4.2 3.1.3-5.9L4 10l5.8-1.9L12 3Z"></path><path d="m9.5 11.5 1.7 1.7 3.5-3.8"></path></svg></span><h3>Quality Prints</h3><p>Color, clarity, and materials chosen to make every piece stand out.</p></article>
+          <article class="benefit-card"><span class="benefit-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7v5l3.3 2"></path><path d="m5.5 5.5 2-2"></path></svg></span><h3>Fast Turnaround</h3><p>We value your time and keep your projects moving with care.</p></article>
+          <article class="benefit-card"><span class="benefit-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.1c0 4.5 3.2 7.8 7.5 9.9 4.3-2.1 7.5-5.4 7.5-9.9V6L12 3Z"></path><path d="M8.5 12h7"></path><path d="M12 8.5v7"></path></svg></span><h3>Fair Prices</h3><p>Clear pricing up front, so you can plan your project with confidence.</p></article>
+          <article class="benefit-card"><span class="benefit-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 20s-7.5-4.5-7.5-10.2A4.2 4.2 0 0 1 12 7.4a4.2 4.2 0 0 1 7.5 2.4C19.5 15.5 12 20 12 20Z"></path><path d="m9 12 2 2 4-4"></path></svg></span><h3>Trusted Service</h3><p>Friendly, thoughtful service from your first question to your finished print.</p></article>
+        </div>
+      </section>
+
+      <section class="contact-section" id="contact" aria-labelledby="contact-title">
+        <div class="section-wrap contact-wrap">
+          <div class="contact-heading">
+            <p class="eyebrow">Let's make it happen</p>
+            <h2 id="contact-title">Have something<br><span class="text-gradient">in mind?</span></h2>
+            <p>Need a custom size, a bulk quote, or just a little advice? We’re happy to help.</p>
+            <a class="button button-gradient" data-contact-link href="#contact">Message AuraTrust <span aria-hidden="true">↗</span></a>
+          </div>
+          <div class="contact-details" id="contact-details"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="section-wrap footer-inner">
+        <a class="footer-brand" href="#" aria-label="AuraTrust home">
+          <span class="brand-mark-crop"><img src="assets/logos2.png" alt="" loading="lazy"></span>
+          <span class="brand-wordmark"><strong>AURATRUST</strong><small>PRINTING &amp; DIGITAL SERVICES</small></span>
+        </a>
+        <p>Thoughtful printing for the things that matter.</p>
+        <div class="footer-meta"><span>© <span id="copyright-year"></span> AuraTrust Printing & Digital Services</span><a href="#prices">Price list</a><a href="#contact">Contact</a><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a></div>
+      </div>
+    </footer>
+  </body>
+</html>
