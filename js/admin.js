@@ -4,10 +4,8 @@ import {
   isAdminEmailConfigured,
   isFirebaseConfigured,
   observeAuth,
-  reloadAdminUser,
   removeService,
   saveService,
-  sendAdminVerificationEmail,
   signInAdmin,
   signOutAdmin,
   observeAllOrders,
@@ -19,7 +17,6 @@ const loginView = document.querySelector("#login-view");
 const dashboardView = document.querySelector("#dashboard-view");
 const loginForm = document.querySelector("#login-form");
 const loginStatus = document.querySelector("#login-status");
-const verificationActions = document.querySelector("#verification-actions");
 const dashboardStatus = document.querySelector("#dashboard-status");
 const serviceForm = document.querySelector("#service-form");
 const tableBody = document.querySelector("#services-table-body");
@@ -164,38 +161,6 @@ loginForm.addEventListener("submit", async (event) => {
   }
 });
 
-document.querySelector("#send-verification").addEventListener("click", async (event) => {
-  const button = event.currentTarget;
-  button.disabled = true;
-  try {
-    await sendAdminVerificationEmail();
-    showMessage(loginStatus, "Verification email sent. Check your inbox and spam folder, click the link, then return and select “I've verified — check again”.");
-  } catch (error) {
-    console.error("Unable to send admin verification email.", error);
-    showMessage(loginStatus, "Could not send the verification email. Sign in again or wait a few minutes before requesting another.", true);
-  } finally {
-    button.disabled = false;
-  }
-});
-
-document.querySelector("#check-verification").addEventListener("click", async (event) => {
-  const button = event.currentTarget;
-  button.disabled = true;
-  try {
-    const user = await reloadAdminUser();
-    if (!user) {
-      showLogin("Your sign-in expired. Sign in again to continue.");
-      return;
-    }
-    await handleAuthState(user);
-  } catch (error) {
-    console.error("Unable to refresh admin verification status.", error);
-    showMessage(loginStatus, "Could not check verification status. Reload the page and try again.", true);
-  } finally {
-    button.disabled = false;
-  }
-});
-
 serviceForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = document.querySelector("#save-service");
@@ -248,10 +213,10 @@ document.querySelector("#logout-button").addEventListener("click", async () => {
   }
 });
 
-function showLogin(message = "", isError = true) {
+function showLogin(message = "") {
   dashboardView.hidden = true;
   loginView.hidden = false;
-  if (message) showMessage(loginStatus, message, isError);
+  if (message) showMessage(loginStatus, message, true);
 }
 
 function isConfiguredAdmin(user) {
@@ -262,12 +227,10 @@ function isConfiguredAdmin(user) {
 
 async function handleAuthState(user) {
   if (!user) {
-    verificationActions.hidden = true;
     showLogin();
     return;
   }
   if (!isConfiguredAdmin(user)) {
-    verificationActions.hidden = true;
     const signedInAs = user.email || "an account without an email address";
     const expected = isAdminEmailConfigured()
       ? ` The configured admin email is ${adminEmail}.`
@@ -280,12 +243,6 @@ async function handleAuthState(user) {
     showLogin(`You are signed in as ${signedInAs}, which does not match the admin account.${expected} Check the account and deployed configuration.`);
     return;
   }
-  if (!user.emailVerified) {
-    showLogin(`Your email (${user.email}) is not verified yet. Send a verification link to your inbox, click it, then return here to check again.`, false);
-    verificationActions.hidden = false;
-    return;
-  }
-  verificationActions.hidden = true;
   loginView.hidden = true;
   dashboardView.hidden = false;
   document.querySelector("#admin-email-label").textContent = user.email;
@@ -362,7 +319,7 @@ orderList.addEventListener("click", async (event) => {
 });
 
 observeAuth(async (user) => {
-  if (user && user.emailVerified && isConfiguredAdmin(user)) {
+  if (user && isConfiguredAdmin(user)) {
     observeAllOrders((orders) => { allOrders = orders; renderOrders(); }, (error) => {
       console.error("Unable to observe orders.",error);
       showToast("Could not load live orders.",true);

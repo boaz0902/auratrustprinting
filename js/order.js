@@ -24,7 +24,7 @@ const fileInput = document.querySelector("#file-input");
 function validateFile(file) {
   const extension = ext(file.name);
   if (!orderLimits.allowedExtensions.includes(extension)) return `“${file.name}” is not a supported file type.`;
-  if (!file.type || (!orderLimits.allowedMimeTypes.includes(file.type) && !["text/plain"].includes(file.type))) {
+  if (file.type && file.type !== "application/octet-stream" && !orderLimits.allowedMimeTypes.includes(file.type)) {
     return `“${file.name}” has an unknown or unsafe file type.`;
   }
   if (file.size > orderLimits.maxFileSizeMB * 1024 * 1024) return `“${file.name}” exceeds the ${orderLimits.maxFileSizeMB} MB limit.`;
@@ -60,7 +60,16 @@ async function addFiles(selectedFiles) {
     document.querySelector("#upload-next").disabled = false;
   } catch (err) {
     console.error(err);
-    error.textContent = "Upload could not start. Check Firebase Storage configuration and try again.";
+    const code = err?.code || "";
+    if (code.includes("auth/operation-not-allowed")) {
+      error.textContent = "Secure customer uploads are unavailable. Anonymous Authentication is not enabled in Firebase.";
+    } else if (code.includes("storage/unauthorized")) {
+      error.textContent = "Upload was blocked by Firebase Security Rules. Please contact AuraTrust.";
+    } else if (code.includes("storage/canceled")) {
+      error.textContent = "Upload was canceled.";
+    } else {
+      error.textContent = err?.message || "Upload could not start. Please check your connection and try again.";
+    }
   }
 }
 function renderFileList() {

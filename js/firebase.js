@@ -73,23 +73,6 @@ export async function signOutAdmin() {
   return authSdk.signOut(authInstance);
 }
 
-export async function sendAdminVerificationEmail() {
-  const { auth: authInstance, authSdk } = await getFirebase();
-  if (!authInstance.currentUser || authInstance.currentUser.isAnonymous) {
-    throw new Error("Sign in with the admin email before requesting verification.");
-  }
-  await authSdk.sendEmailVerification(authInstance.currentUser);
-}
-
-export async function reloadAdminUser() {
-  const { auth: authInstance, authSdk } = await getFirebase();
-  if (!authInstance.currentUser) return null;
-  const user = authInstance.currentUser;
-  await authSdk.reload(user);
-  await authSdk.getIdToken(user, true);
-  return user;
-}
-
 export async function getAllServices() {
   const { firestoreSdk, db: database } = await getFirebase();
   const snapshot = await firestoreSdk.getDocs(firestoreSdk.collection(database, "services"));
@@ -122,8 +105,14 @@ export async function removeService(serviceId) {
 
 export async function ensureAnonymousCustomer() {
   const { auth: authInstance, authSdk } = await getFirebase();
-  if (!authInstance.currentUser) await authSdk.signInAnonymously(authInstance);
-  if (authInstance.currentUser.isAnonymous) return authInstance.currentUser;
+  if (authInstance.currentUser?.isAnonymous) return authInstance.currentUser;
+  if (!authInstance.currentUser) {
+    await authSdk.signInAnonymously(authInstance);
+  } else if (authInstance.currentUser) {
+    await authSdk.signOut(authInstance);
+    await authSdk.signInAnonymously(authInstance);
+  }
+  if (authInstance.currentUser?.isAnonymous) return authInstance.currentUser;
   throw new Error("A customer session could not be created.");
 }
 
@@ -132,8 +121,24 @@ export async function uploadOrderFile(orderId, file, onProgress) {
   if (!authInstance.currentUser?.isAnonymous) throw new Error("Please wait for the secure upload session.");
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const path = `orders/${orderId}/${Date.now()}_${safeName}`;
+  const extension = file.name.split(".").pop().toLowerCase();
+  const typeByExtension = {
+    pdf: "application/pdf",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    xls: "application/vnd.ms-excel",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ppt: "application/vnd.ms-powerpoint",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
+    txt: "text/plain"
+  };
+  const contentType = typeByExtension[extension] || file.type || "application/octet-stream";
   const task = storageSdk.uploadBytesResumable(storageSdk.ref(storageInstance, path), file, {
-    contentType: file.type || "application/octet-stream",
+    contentType,
     customMetadata: { originalName: file.name }
   });
   await new Promise((resolve, reject) => {
@@ -169,6 +174,7 @@ export async function trackCustomerOrder(orderNumber, mobile) {
   const normalizedMobile = mobile.replace(/\D/g, "");
   const snapshot = await firestoreSdk.getDocs(firestoreSdk.query(
     firestoreSdk.collection(database, "orders"),
+    firestoreSdk.where("ownerUid", "==", authInstance.currentUser.uid),
     firestoreSdk.where("orderNumber", "==", orderNumber.trim())
   ));
   const match = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
