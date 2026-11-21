@@ -21,7 +21,7 @@ export async function getPublicPriceData() {
   const client = requireSupabase();
   const { data, error } = await client
     .from("services")
-    .select("id,name,category,description,unit,price,variants,popular,visible,sort_order,updated_at")
+    .select("id,name,category,description,unit,price,variants,popular,visible,sort_order,updated_at,paper_size,color_mode,file_kinds")
     .eq("visible", true)
     .order("sort_order", { ascending: true });
   if (error) throw error;
@@ -35,7 +35,7 @@ export async function getPublicPriceData() {
 export async function getAllServices() {
   const { data, error } = await requireSupabase()
     .from("services")
-    .select("id,name,category,description,unit,price,variants,popular,visible,sort_order,updated_at")
+    .select("id,name,category,description,unit,price,variants,popular,visible,sort_order,updated_at,paper_size,color_mode,file_kinds")
     .order("sort_order", { ascending: true });
   if (error) throw error;
   return data || [];

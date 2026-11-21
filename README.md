@@ -58,3 +58,14 @@ If price loading fails or no visible service is available, the public price page
 - `css/styles.css` — shared responsive styles and reduced-motion behavior.
 
 Orders accept up to 10 print files, 25 MB each: PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, JPG/JPEG, PNG, WebP, or TXT. The receipt screenshot must be a JPG, PNG, or WebP image and is stored alongside the order files.
+
+## Preview and print-option linking
+
+Step 2 uses the `paper_size`, `color_mode`, and `file_kinds` fields from the `services` table. Supported paper sizes are `short`, `a4`, `long`, and `a3`. Supported color modes are `color` and `bw`.
+
+- Upload detection suggests a service and initial paper/color values. Every suggestion is shown with a **Suggested** chip and can be changed.
+- Choosing a service automatically applies that service's paper size and color mode.
+- Changing paper size or color mode searches for a sibling in the same service category with both matching fields. For example, a Document Printing category entry for A4 in B&W uses its matching sibling rather than keeping an incompatible Legal/A4 combination.
+- If no matching sibling exists, the selection remains visible and is marked **To be confirmed**. It is excluded from the estimate and the customer receives a gentle inline notice that AuraTrust will confirm the price.
+- Paper sizes remain tied to the sheet preview: Short = 8.5 × 11 in, A4 = 8.27 × 11.69 in, Long = 8.5 × 13 in, and A3 = 11.69 × 16.54 in.
+- PDF pages are detected automatically. For non-PDF files, the customer enters or reviews the page range; estimates use the live copies and page-range values.

@@ -1,6 +1,8 @@
 import { gcashInfo, orderLimits } from "./config.js";
 import { createCustomerOrder, ensureAnonymousCustomer, getPublicPriceData, requireSupabase, uploadOrderFile } from "./supabase.js";
 import { sampleServices } from "./sample-data.js";
+import { renderWorkspace, renderFileRail, renderActivePreview, movePdfPage, drawImagePreview } from "./preview.js";
+import { initializeOptions, renderOptions, updateLiveSummary, calculateEstimate, getPageCount, getLinePrice, validatePages, showToast } from "./options.js";
 
 const currency = new Intl.NumberFormat("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const files = [];
@@ -221,15 +223,8 @@ async function renderPreview(entry, index) {
     }
     return;
   }
-  if (extension(file.name) === "docx" && window.mammoth) {
-    container.innerHTML = `<div class="docx-preview">Loading preview…</div>`;
-    try {
-      const { value } = await window.mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
-      container.innerHTML = `<div class="docx-preview">${sanitizePreview(value)}</div>`;
-    } catch (error) {
-      console.error("DOCX preview failed.", error);
-      container.innerHTML = `<div class="unsupported-preview">Document preview unavailable.</div>`;
-    }
+  if (extension(file.name) === "docx") {
+    container.innerHTML = `<div class="unsupported-preview">Preview is handled by the new document viewer.</div>`;
     return;
   }
   if (["xls", "xlsx"].includes(extension(file.name)) && window.XLSX) {
@@ -263,104 +258,127 @@ function renderVariantSelect(entry, index) {
   return label;
 }
 
-function renderPreviews() {
-  document.querySelector("#preview-list").innerHTML = files.map((entry, index) => `
-    <article class="preview-item"><div class="preview-layout">
-      <div class="preview-pane" data-preview="${index}"></div>
-      <div class="print-options">
-        <h3>${escapeHtml(entry.file.name)}</h3>
-        <label class="order-field"><span>Service type</span><select data-option="service" data-index="${index}" required><option value="">Choose service</option>${services.map((service, serviceIndex) => `<option value="${escapeHtml(serviceId(service, serviceIndex))}" ${entry.options.service === serviceId(service, serviceIndex) ? "selected" : ""}>${escapeHtml(service.name)} — ${escapeHtml(service.category)}</option>`).join("")}</select></label>
-        <div data-variants="${index}">${renderVariantSelect(entry, index)}</div>
-        <div class="option-grid"><label class="order-field"><span>Paper size</span><select data-option="paper" data-index="${index}"><option>A4</option><option>Short</option><option>Long</option><option>Other</option></select></label><label class="order-field"><span>Copies</span><input data-option="copies" data-index="${index}" type="number" min="1" max="500" step="1" value="${entry.options.copies}" inputmode="numeric"></label></div>
-        <div class="option-grid"><label class="order-field"><span>Print</span><select data-option="color" data-index="${index}"><option value="Color">Color</option><option value="B&W">B&amp;W</option></select></label><label class="order-field"><span>Sides</span><select data-option="sides" data-index="${index}"><option>Single-sided</option><option>Double-sided</option></select></label></div>
-        <label class="order-field"><span>Page range</span><input data-option="pages" data-index="${index}" value="${escapeHtml(entry.options.pages)}" placeholder="All pages or 1-5" maxlength="60"></label>
-        <label class="order-field"><span>Notes for the shop</span><textarea data-option="notes" data-index="${index}" rows="3" maxlength="500" placeholder="Tell us any special instructions">${escapeHtml(entry.options.notes)}</textarea></label>
-      </div>
-    </div></article>
-  `).join("");
-  files.forEach((entry, index) => {
-    const paper = document.querySelector(`[data-option="paper"][data-index="${index}"]`);
-    const color = document.querySelector(`[data-option="color"][data-index="${index}"]`);
-    const sides = document.querySelector(`[data-option="sides"][data-index="${index}"]`);
-    paper.value = entry.options.paper;
-    color.value = entry.options.color;
-    sides.value = entry.options.sides;
-    renderPreview(entry, index);
-  });
+const previewContext = { activeIndex: 0 };
+
+async function renderPreviews() {
+  const container = document.querySelector("#preview-step2");
+  renderWorkspace(container, files);
+  document.querySelector("#step-file-count").textContent = `${files.length} file${files.length === 1 ? "" : "s"}`;
+  files.forEach((entry) => { entry.isActive = false; });
+  files[0].isActive = true;
+  previewContext.activeIndex = 0;
+  await initializeOptions(files, services, previewContext);
+  await renderActivePreview(files[0], 0);
+  updateLiveSummary(files, services);
 }
 
-document.querySelector("#preview-list").addEventListener("change", (event) => {
-  const control = event.target.closest("[data-option]");
-  if (!control) return;
-  const index = Number(control.dataset.index);
-  const entry = files[index];
-  const key = control.dataset.option;
-  if (key === "copies") {
-    const copies = Number(control.value);
-    if (!Number.isInteger(copies) || copies < 1 || copies > 500) {
-      control.setCustomValidity("Enter a whole number from 1 to 500.");
-      control.reportValidity();
-      control.value = String(entry.options.copies);
+document.querySelector("#preview-step2").addEventListener("click", async (event) => {
+  const card = event.target.closest("[data-preview-file]");
+  if (card) {
+    if (event.target.closest("[data-preview-remove]")) return;
+    const nextIndex = Number(card.dataset.previewFile);
+    files.forEach((entry) => { entry.isActive = false; });
+    files[nextIndex].isActive = true;
+    previewContext.activeIndex = nextIndex;
+    renderFileRail(files, nextIndex);
+    renderOptions(files[nextIndex], nextIndex, files, services, previewContext);
+    await renderActivePreview(files[nextIndex], nextIndex);
+  }
+
+  const remove = event.target.closest("[data-preview-remove]");
+  if (remove) {
+    const removedIndex = Number(remove.dataset.previewRemove);
+    const [removed] = files.splice(removedIndex, 1);
+    if (removed.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+    if (!files.length) {
+      setStep(1);
+      renderFileList();
       return;
     }
-    control.setCustomValidity("");
-    entry.options.copies = copies;
-  } else {
-    entry.options[key] = control.value;
+    renderFileList();
+    previewContext.activeIndex = Math.min(removedIndex, files.length - 1);
+    files.forEach((entry) => { entry.isActive = false; });
+    files[previewContext.activeIndex].isActive = true;
+    renderFileRail(files, previewContext.activeIndex);
+    renderOptions(files[previewContext.activeIndex], previewContext.activeIndex, files, services, previewContext);
+    await renderActivePreview(files[previewContext.activeIndex], previewContext.activeIndex);
+    document.querySelector("#step-file-count").textContent = `${files.length} file${files.length === 1 ? "" : "s"}`;
   }
-  if (key === "service") {
-    entry.options.variantLabel = "";
-    document.querySelector(`[data-variants="${index}"]`).innerHTML = renderVariantSelect(entry, index);
+
+  const action = event.target.closest("[data-preview-action]");
+  if (action) {
+    const entry = files[previewContext.activeIndex];
+    const sheet = document.querySelector("#preview-sheet");
+    const zoomLabel = document.querySelector("#preview-zoom-label");
+    entry.previewZoom ||= 1;
+    if (action.dataset.previewAction === "zoom-in") entry.previewZoom = Math.min(2.5, entry.previewZoom + 0.15);
+    if (action.dataset.previewAction === "zoom-out") entry.previewZoom = Math.max(0.6, entry.previewZoom - 0.15);
+    if (action.dataset.previewAction === "fit") entry.previewZoom = 1;
+    if (["zoom-in", "zoom-out", "fit"].includes(action.dataset.previewAction)) {
+      sheet.style.transform = `scale(${entry.previewZoom})`;
+      if (zoomLabel) zoomLabel.textContent = `${Math.round(entry.previewZoom * 100)}%`;
+    }
+    if (action.dataset.previewAction === "previous") await movePdfPage(entry, previewContext.activeIndex, -1);
+    if (action.dataset.previewAction === "next") await movePdfPage(entry, previewContext.activeIndex, 1);
+    if (action.dataset.previewAction === "fullscreen") openFullscreen(entry);
+    if (action.dataset.previewAction === "close-fullscreen") closeFullscreen();
+  }
+
+  const thumb = event.target.closest("[data-pdf-position]");
+  if (thumb) {
+    const entry = files[previewContext.activeIndex];
+    entry.pdfCurrentPosition = Number(thumb.dataset.pdfPosition);
+    await renderActivePreview(entry, previewContext.activeIndex);
+  }
+
+  const imageAction = event.target.closest("[data-image-action]");
+  if (imageAction) {
+    const entry = files[previewContext.activeIndex];
+    if (imageAction.dataset.imageAction === "rotate") entry.imageRotation = ((entry.imageRotation || 0) + 90) % 360;
+    if (imageAction.dataset.imageAction === "crop") entry.imageCrop = !entry.imageCrop;
+    drawImagePreview(entry, document.querySelector("#preview-image-canvas"));
   }
 });
 
-document.querySelector("#preview-list").addEventListener("click", async (event) => {
-  const indexOf = (selector) => Number(selector.dataset[Object.keys(selector.dataset).find((key) => key !== "index")]);
-  const imageButton = event.target.closest("[data-image-rotate], [data-image-bw], [data-image-crop]");
-  if (imageButton) {
-    const index = indexOf(imageButton);
-    const entry = files[index];
-    if (imageButton.hasAttribute("data-image-rotate")) entry.imageRotation = ((entry.imageRotation || 0) + 90) % 360;
-    if (imageButton.hasAttribute("data-image-bw")) entry.imageBW = !entry.imageBW;
-    if (imageButton.hasAttribute("data-image-crop")) entry.imageCrop = !entry.imageCrop;
-    imageCanvas(entry, document.querySelector(`[data-image-canvas="${index}"]`));
-    return;
+document.querySelector("#preview-step2").addEventListener("keydown", (event) => {
+  const card = event.target.closest("[data-preview-file]");
+  if (card && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    card.click();
   }
-  const pdfButton = event.target.closest("[data-pdf-prev], [data-pdf-next], [data-pdf-rotate], [data-pdf-delete], [data-pdf-left], [data-pdf-right]");
-  if (!pdfButton) return;
-  const index = indexOf(pdfButton);
-  const entry = files[index];
-  const available = entry.pdfOrder.filter((page) => !entry.pdfDeleted.has(page));
-  const position = entry.pdfCurrentPosition || 0;
-  const originalPage = available[position];
-  if (pdfButton.hasAttribute("data-pdf-prev")) entry.pdfCurrentPosition = Math.max(0, position - 1);
-  if (pdfButton.hasAttribute("data-pdf-next")) entry.pdfCurrentPosition = Math.min(available.length - 1, position + 1);
-  if (pdfButton.hasAttribute("data-pdf-rotate")) entry.pdfRotations.set(originalPage, ((entry.pdfRotations.get(originalPage) || 0) + 90) % 360);
-  if (pdfButton.hasAttribute("data-pdf-delete")) {
-    if (available.length === 1) {
-      document.querySelector("#upload-error").textContent = "A PDF must keep at least one page.";
-      return;
-    }
-    entry.pdfDeleted.add(originalPage);
-    entry.pdfCurrentPosition = Math.min(position, available.length - 2);
+});
+
+document.querySelector("#preview-step2").addEventListener("change", (event) => {
+  if (event.target.id === "preview-bw-switch") {
+    document.querySelector("#preview-sheet-content")?.classList.toggle("is-bw", event.target.checked);
   }
-  if (pdfButton.hasAttribute("data-pdf-left") && position > 0) {
-    const pageOrderPosition = entry.pdfOrder.indexOf(originalPage);
-    const previousPosition = entry.pdfOrder.indexOf(available[position - 1]);
-    [entry.pdfOrder[pageOrderPosition], entry.pdfOrder[previousPosition]] = [entry.pdfOrder[previousPosition], entry.pdfOrder[pageOrderPosition]];
-    entry.pdfCurrentPosition--;
-  }
-  if (pdfButton.hasAttribute("data-pdf-right") && position < available.length - 1) {
-    const pageOrderPosition = entry.pdfOrder.indexOf(originalPage);
-    const nextPosition = entry.pdfOrder.indexOf(available[position + 1]);
-    [entry.pdfOrder[pageOrderPosition], entry.pdfOrder[nextPosition]] = [entry.pdfOrder[nextPosition], entry.pdfOrder[pageOrderPosition]];
-    entry.pdfCurrentPosition++;
-  }
-  try {
-    await renderPdf(entry, document.querySelector(`[data-preview="${index}"]`), index);
-  } catch (error) {
-    console.error("Could not update the PDF preview.", error);
-  }
+});
+
+function openFullscreen(entry) {
+  const modal = document.querySelector("#preview-fullscreen");
+  const fullscreen = document.querySelector("#fullscreen-sheet");
+  const content = document.querySelector("#preview-sheet-content");
+  const clone = content.cloneNode(true);
+  clone.classList.toggle("is-bw", document.querySelector("#preview-bw-switch")?.checked);
+  fullscreen.querySelectorAll(".fullscreen-content").forEach((node) => node.remove());
+  clone.classList.add("fullscreen-content");
+  clone.style.width = "min(760px,86%)";
+  clone.style.height = "calc(100% - 40px)";
+  fullscreen.append(clone);
+  modal.classList.add("is-open");
+  modal.querySelector("[data-preview-action='close-fullscreen']").focus();
+  document.body.style.overflow = "hidden";
+}
+
+function closeFullscreen() {
+  const modal = document.querySelector("#preview-fullscreen");
+  modal?.classList.remove("is-open");
+  document.querySelectorAll("#fullscreen-sheet .fullscreen-content").forEach((node) => node.remove());
+  document.body.style.overflow = "";
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeFullscreen();
 });
 
 async function processedFile(entry) {
@@ -388,38 +406,20 @@ async function processedFile(entry) {
 }
 
 function pageCount(entry) {
-  const range = entry.options.pages.trim();
-  if (range && range.toLowerCase() !== "all") {
-    const numbers = new Set();
-    for (const part of range.split(",")) {
-      const match = part.trim().match(/^(\d+)(?:\s*-\s*(\d+))?$/);
-      if (!match) throw new Error(`Use a page range like “1-5” for ${entry.file.name}.`);
-      const start = Number(match[1]);
-      const end = Number(match[2] || match[1]);
-      if (end < start || end - start > 1000) throw new Error(`The page range for ${entry.file.name} is invalid.`);
-      for (let page = start; page <= end; page++) numbers.add(page);
-    }
-    return numbers.size;
-  }
-  return entry.pdf ? entry.pdfOrder.filter((page) => !entry.pdfDeleted.has(page)).length : 1;
+  return getPageCount(entry);
 }
 
 function priceFor(entry) {
   const service = selectedService(entry);
-  if (!service) throw new Error(`Choose a service for ${entry.file.name}.`);
-  const variants = Array.isArray(service.variants) ? service.variants : [];
-  const variant = variants.find((item) => item.label === entry.options.variantLabel);
-  if (variants.length && !variant) throw new Error(`Choose a price option for ${entry.file.name}.`);
-  const unitPrice = variants.length ? Number(variant.price) : Number(service.price);
-  if (!Number.isFinite(unitPrice) || unitPrice < 0) throw new Error(`The selected service has no usable price.`);
-  return { service, variant, unitPrice };
+  const line = getLinePrice(entry, services);
+  if (!line.confirmed) return { service, variant: null, unitPrice: 0 };
+  const variants = Array.isArray(service?.variants) ? service.variants : [];
+  const variant = variants.find((item) => item.label === entry.options.variantLabel) || null;
+  return { service, variant, unitPrice: line.price };
 }
 
 function calculateTotal() {
-  return files.reduce((total, entry) => {
-    const { unitPrice } = priceFor(entry);
-    return total + unitPrice * pageCount(entry) * Number(entry.options.copies);
-  }, 0);
+  return calculateEstimate(files, services);
 }
 
 function renderSummary() {
@@ -427,9 +427,9 @@ function renderSummary() {
   const rows = files.map((entry) => {
     const { service, variant, unitPrice } = priceFor(entry);
     const quantity = pageCount(entry) * Number(entry.options.copies);
-    const label = `${service.name}${variant ? ` · ${variant.label}` : ""} · ${quantity} unit(s)`;
-    const line = unitPrice * quantity;
-    return `<div class="summary-row"><div><strong>${escapeHtml(entry.file.name)}</strong><span>${escapeHtml(label)}</span></div><strong>₱${currency.format(line)}</strong></div>`;
+    const line = getLinePrice(entry, services);
+    const label = `${service?.name || "Service to be confirmed"}${variant ? ` · ${variant.label}` : ""} · ${quantity} unit(s)`;
+    return `<div class="summary-row"><div><strong>${escapeHtml(entry.file.name)}</strong><span>${escapeHtml(label)}</span></div><strong>${line.confirmed ? `₱${currency.format(unitPrice * quantity)}` : "To be confirmed"}</strong></div>`;
   }).join("");
   document.querySelector("#order-summary").innerHTML = `<h3>Estimated breakdown</h3>${rows}<div class="summary-total"><span>Estimated total</span><strong>₱${currency.format(total)}</strong></div><p class="summary-note">The final price is confirmed by the shop. This estimate uses the selected service, options, copies, and page range.</p>`;
   document.querySelector("#gcash-exact").textContent = `Exact amount: ₱${currency.format(total)}`;
@@ -442,7 +442,7 @@ document.querySelector("#upload-next").addEventListener("click", () => {
   setStep(2);
 });
 
-document.querySelector("#options-next").addEventListener("click", () => {
+function continueFromOptions() {
   const selects = [...document.querySelectorAll('[data-option="service"], [data-option="variantLabel"]')];
   const missing = selects.find((select) => !select.value);
   if (missing) {
@@ -451,12 +451,16 @@ document.querySelector("#options-next").addEventListener("click", () => {
     return;
   }
   try {
+    const total = calculateEstimate(files, services);
     renderSummary();
     setStep(3);
   } catch (error) {
     uploadError.textContent = error.message;
   }
-});
+}
+
+document.querySelector("#options-next").addEventListener("click", continueFromOptions);
+document.querySelector("#options-next-mobile").addEventListener("click", continueFromOptions);
 document.querySelectorAll("[data-back]").forEach((button) => button.addEventListener("click", () => setStep(Number(button.dataset.back))));
 
 document.querySelector("#gcash-name").textContent = gcashInfo.name;
@@ -526,7 +530,7 @@ async function createOrder(form) {
         storagePath: uploaded.path,
         fileType: file.type || "application/octet-stream",
         size: file.size,
-        options: { ...entry.options, service: service.name, serviceId: service.id || null, variant: variant || null }
+        options: { ...entry.options, service: service?.name || "To be confirmed", serviceId: service?.id || null, variant: variant || null }
       });
     }
 
@@ -600,6 +604,14 @@ async function loadServices() {
   } catch (error) {
     console.error("Unable to load prices for the order form.", error);
     services = sampleServices.filter((service) => service.visible);
+  }
+  if (!services.some((service) => service.id)) {
+    services = services.map((service, index) => ({
+      ...service,
+      id: `sample-${index}`,
+      paper_size: null,
+      color_mode: null
+    }));
   }
   if (!services.length) {
     document.querySelector("#order-service-error").hidden = false;

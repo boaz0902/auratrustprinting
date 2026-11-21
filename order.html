@@ -11,7 +11,7 @@
   <script>tailwind={config:{theme:{extend:{colors:{brand:{blue:"#2F6FED",indigo:"#3B3FD1",aqua:"#8FE0E3",slate:"#38434E",paper:"#F6F9FE"}},fontFamily:{heading:["Sora","sans-serif"],sans:["Inter","sans-serif"]}}}}};</script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.3.2/dist/docx-preview.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
   <link rel="stylesheet" href="css/styles.css"><script type="module" src="js/order.js"></script>
@@ -36,9 +36,13 @@
         <div class="step-actions"><button id="upload-next" class="button button-gradient" type="button" disabled>Continue to preview →</button></div>
       </section>
       <section class="wizard-step" data-panel="2" hidden>
-        <h2>Preview & print options</h2><p class="step-copy">Review each file and choose how you want it printed.</p>
-        <div id="preview-list" class="preview-list"></div>
-        <div class="step-actions split"><button class="button button-outline" type="button" data-back="1">← Back</button><button id="options-next" class="button button-gradient" type="button">Continue to payment →</button></div>
+        <div class="step-two-heading">
+          <div><p class="eyebrow">File review</p><h2>Preview &amp; options</h2></div>
+          <span class="step-count" id="step-file-count">0 files</span>
+        </div>
+        <div id="preview-step2" class="preview-step2"></div>
+        <div class="step-actions split"><button class="at-btn at-btn-secondary" type="button" data-back="1">← Back</button><button id="options-next" class="at-btn at-btn-primary" type="button">Continue to payment →</button></div>
+        <div class="mobile-step-bar" aria-label="Continue from preview"><div><span>Estimated total</span><strong id="mobile-live-total">₱0.00</strong></div><button id="options-next-mobile" class="at-btn at-btn-primary" type="button">Continue <span aria-hidden="true">→</span></button></div>
       </section>
       <section class="wizard-step" data-panel="3" hidden>
         <h2>Summary & GCash payment</h2>
