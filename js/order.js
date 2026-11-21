@@ -45,6 +45,14 @@ const fileInput = document.querySelector("#file-input");
 const fileList = document.querySelector("#file-list");
 const uploadError = document.querySelector("#upload-error");
 
+if (location.protocol === "file:") {
+  uploadError.textContent = "Local ES modules need an HTTP server. Run start-local.bat, then open http://127.0.0.1:8765/order.html.";
+  document.querySelector("#upload-next").disabled = true;
+  document.querySelector("#browse-files").disabled = true;
+}
+
+document.querySelector("#browse-files").addEventListener("click", () => fileInput.click());
+
 function validateFile(file) {
   const fileExtension = extension(file.name);
   const blockedExtensions = ["exe", "bat", "cmd", "com", "scr", "msi", "vbs", "ps1", "jar", "dll", "sh"];

@@ -12,6 +12,8 @@ python -m http.server 8000
 
 Then open `http://localhost:8000`.
 
+On Windows, you can also double-click `start-local.bat`. It starts the static site on `http://127.0.0.1:8765/` and opens Chrome automatically. Keep the terminal window open while testing.
+
 ## Configure Supabase
 
 1. In `js/config.js`, set `SUPABASE_URL` to the Supabase project URL and `SUPABASE_ANON_KEY` to the project's **public anon/publishable key**. These values are intended for browser use. Never put a `service_role` key in this project.
