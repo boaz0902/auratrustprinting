@@ -236,6 +236,8 @@ h1, h2, h3 { font-family: "Sora", sans-serif; letter-spacing: -.045em; }
 .admin-field textarea { min-height: 85px; resize: vertical; line-height: 1.65; }
 .admin-field small { color: #97a2af; font-size: 9px; font-weight: 400; }
 .login-panel form { display: grid; gap: 17px; }
+.verification-actions { display: grid; gap: 10px; margin-top: 16px; }
+.verification-actions .button { width: 100%; }
 .admin-submit { min-height: 45px; width: fit-content; margin-top: 5px; border: 0; cursor: pointer; }
 .admin-submit:disabled { opacity: .65; cursor: wait; transform: none; }
 .login-panel .admin-submit { width: 100%; margin-top: 3px; }

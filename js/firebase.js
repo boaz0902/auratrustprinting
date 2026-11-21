@@ -73,6 +73,23 @@ export async function signOutAdmin() {
   return authSdk.signOut(authInstance);
 }
 
+export async function sendAdminVerificationEmail() {
+  const { auth: authInstance, authSdk } = await getFirebase();
+  if (!authInstance.currentUser || authInstance.currentUser.isAnonymous) {
+    throw new Error("Sign in with the admin email before requesting verification.");
+  }
+  await authSdk.sendEmailVerification(authInstance.currentUser);
+}
+
+export async function reloadAdminUser() {
+  const { auth: authInstance, authSdk } = await getFirebase();
+  if (!authInstance.currentUser) return null;
+  const user = authInstance.currentUser;
+  await authSdk.reload(user);
+  await authSdk.getIdToken(user, true);
+  return user;
+}
+
 export async function getAllServices() {
   const { firestoreSdk, db: database } = await getFirebase();
   const snapshot = await firestoreSdk.getDocs(firestoreSdk.collection(database, "services"));
