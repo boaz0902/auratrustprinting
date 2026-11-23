@@ -1,6 +1,5 @@
 import { businessInfo } from "./config.js";
-import { sampleServices } from "./sample-data.js";
-import { getPublicPriceData, isSupabaseConfigured } from "./supabase.js";
+import { priceList } from "./sample-data.js";
 
 const categoryTabs = document.querySelector("#category-tabs");
 const categoryContainer = document.querySelector("#price-categories");
@@ -9,7 +8,7 @@ const statusMessage = document.querySelector("#prices-status");
 const lastUpdated = document.querySelector("#last-updated");
 const currency = new Intl.NumberFormat("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 let selectedCategory = "All";
-let services = sampleServices.filter((service) => service.visible);
+let services = priceList.filter((service) => service.visible);
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, (character) => ({
@@ -19,6 +18,10 @@ function escapeHtml(value = "") {
 
 function formatPrice(price) {
   return `₱${currency.format(price)}`;
+}
+
+function hasPrice(price) {
+  return price !== null && price !== undefined && price !== "" && Number.isFinite(Number(price));
 }
 
 function renderTabs() {
@@ -33,12 +36,18 @@ function renderTabs() {
 
 function renderService(service) {
   const variants = Array.isArray(service.variants) ? service.variants : [];
-  const priceContent = variants.length
-    ? `<div class="service-price-row"><span class="starting-label">Starting at</span><span class="service-price"><span class="currency">₱</span>${currency.format(Math.min(...variants.map((variant) => Number(variant.price))))}</span></div>
-       <div class="variant-list">${variants.map((variant) => `
-         <div class="variant-row"><span>${escapeHtml(variant.label)}</span><strong>${formatPrice(Number(variant.price))}</strong></div>
-       `).join("")}</div>`
-    : `<div class="service-price-row"><span class="service-price"><span class="currency">₱</span>${currency.format(Number(service.price))}</span><span class="service-unit">${escapeHtml(service.unit)}</span></div>`;
+  const prices = variants.map((variant) => variant.price).filter(hasPrice).map(Number);
+  const priceContent = `
+    ${prices.length ? `<div class="service-price-row"><span class="starting-label">Starting at</span><span class="service-price"><span class="currency">₱</span>${currency.format(Math.min(...prices))}</span></div>` : ""}
+    ${hasPrice(service.price) ? `<div class="service-price-row"><span class="service-price"><span class="currency">₱</span>${currency.format(Number(service.price))}</span><span class="service-unit">${escapeHtml(service.unit)}</span></div>` : ""}
+    ${variants.length ? `<div class="variant-list">${variants.map((variant) => `
+      <div class="variant-row"><span>${escapeHtml(variant.label)}</span><strong>${hasPrice(variant.price) ? formatPrice(Number(variant.price)) : "Price to be confirmed"}</strong></div>
+    `).join("")}</div>` : ""}
+    ${(service.addons || []).length ? `<div class="variant-list addon-list">${service.addons.map((addon) => `
+      <div class="variant-row"><span>${escapeHtml(addon.label)}</span><strong>${hasPrice(addon.price) ? `+${formatPrice(Number(addon.price))}` : "Price to be confirmed"}</strong></div>
+    `).join("")}</div>` : ""}
+    ${!prices.length && !hasPrice(service.price) && !variants.length ? `<div class="service-price-row"><span class="service-unit">Price to be confirmed</span></div>` : ""}
+  `;
 
   return `<article class="service-card">
     <div class="service-card-top"><h4>${escapeHtml(service.name)}</h4>${service.popular ? '<span class="popular-badge">Popular</span>' : ""}</div>
@@ -51,7 +60,7 @@ function renderPrices() {
   const query = searchInput.value.trim().toLocaleLowerCase();
   const filtered = services.filter((service) => {
     const matchesCategory = selectedCategory === "All" || service.category === selectedCategory;
-    const searchable = `${service.name} ${service.category} ${service.description} ${service.unit} ${(service.variants || []).map((variant) => variant.label).join(" ")}`.toLocaleLowerCase();
+    const searchable = `${service.name} ${service.category} ${service.description} ${service.unit} ${(service.variants || []).map((variant) => variant.label).join(" ")} ${(service.addons || []).map((addon) => addon.label).join(" ")}`.toLocaleLowerCase();
     return matchesCategory && searchable.includes(query);
   });
 
@@ -74,37 +83,9 @@ function renderPrices() {
   }).join("");
 }
 
-function formatUpdatedDate(value) {
-  const date = value ? new Date(value) : null;
-  return date && !Number.isNaN(date.getTime())
-    ? new Intl.DateTimeFormat("en-PH", { year: "numeric", month: "long", day: "numeric" }).format(date)
-    : "Date unavailable";
-}
-
-async function loadPrices() {
-  if (!isSupabaseConfigured()) {
-    statusMessage.textContent = "Supabase is not configured. Showing sample prices; please message AuraTrust to confirm current rates.";
-    renderTabs();
-    renderPrices();
-    return;
-  }
-
-  try {
-    const data = await getPublicPriceData();
-    if (data.services.length) {
-      services = data.services;
-      lastUpdated.innerHTML = `Prices last updated: <span>${escapeHtml(formatUpdatedDate(data.lastUpdated))}</span>`;
-      statusMessage.textContent = "";
-    } else {
-      services = sampleServices.filter((service) => service.visible);
-      statusMessage.textContent = "Our live price list is being updated. This sample guide is for reference—please message us to confirm current rates.";
-    }
-  } catch (error) {
-    console.error("Unable to load public prices from Supabase.", error);
-    services = sampleServices.filter((service) => service.visible);
-    statusMessage.textContent = "Live prices are temporarily unavailable. This sample guide is for reference—please message us to confirm current rates.";
-    statusMessage.classList.add("error");
-  }
+function loadPrices() {
+  statusMessage.textContent = "Options without a posted rate are marked “Price to be confirmed.”";
+  lastUpdated.innerHTML = "Prices supplied by <span>AuraTrust</span>";
   renderTabs();
   renderPrices();
 }
@@ -159,7 +140,7 @@ navLinks.addEventListener("click", (event) => {
 });
 
 document.querySelector("#copyright-year").textContent = String(new Date().getFullYear());
-lastUpdated.innerHTML = `Prices last updated: <span>Sample list</span>`;
+lastUpdated.innerHTML = "Prices supplied by <span>AuraTrust</span>";
 renderContact();
 loadPrices();
 

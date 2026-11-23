@@ -18,9 +18,7 @@ export function extension(name) {
 export function renderWorkspace(container, files) {
   container.innerHTML = `
     <div class="preview-workspace">
-      <aside class="preview-file-rail at-card" aria-label="Uploaded files">
-        <div id="preview-file-list" class="preview-file-list"></div>
-      </aside>
+      <div id="preview-file-tabs" class="preview-file-tabs" role="tablist" aria-label="Uploaded files"></div>
       <section class="preview-stage" aria-label="Document preview">
         <div class="preview-toolbar">
           <div class="preview-toolbar-group">
@@ -44,22 +42,19 @@ export function renderWorkspace(container, files) {
         </div>
         <div id="preview-page-strip" class="preview-page-strip" aria-label="PDF page thumbnails"></div>
       </section>
-      <aside class="preview-options-panel at-card" aria-label="Print options">
+      <aside class="preview-options-panel" aria-label="Print options">
         <div id="preview-options"></div>
       </aside>
-    </div>
-    <div id="preview-fullscreen" class="fullscreen-modal" role="dialog" aria-modal="true" aria-label="Fullscreen document preview">
-      <div class="fullscreen-sheet" id="fullscreen-sheet"><button class="at-icon-btn fullscreen-close" type="button" data-preview-action="close-fullscreen" aria-label="Close fullscreen preview">×</button></div>
     </div>
   `;
   renderFileRail(files);
 }
 
 export function renderFileRail(files, activeIndex = 0) {
-  const rail = document.querySelector("#preview-file-list");
+  const rail = document.querySelector("#preview-file-tabs");
   if (!rail) return;
   rail.innerHTML = files.map((entry, index) => `
-    <article class="preview-file-card ${index === activeIndex ? "is-active" : ""}" data-preview-file="${index}" role="button" tabindex="0" aria-label="Preview ${escapeHtml(entry.file.name)}">
+    <article class="preview-file-tab ${index === activeIndex ? "is-active" : ""}" data-preview-file="${index}" role="tab" aria-selected="${index === activeIndex}" tabindex="${index === activeIndex ? "0" : "-1"}" aria-label="Preview ${escapeHtml(entry.file.name)}">
       <div class="preview-thumb" data-preview-thumb="${index}"><span>${escapeHtml(extension(entry.file.name).toUpperCase())}</span></div>
       <div class="preview-file-meta"><strong>${escapeHtml(entry.file.name)}</strong><span>${formatSize(entry.file.size)}</span><span class="file-type-badge">${escapeHtml(extension(entry.file.name).toUpperCase())}</span></div>
       <button class="preview-remove" type="button" data-preview-remove="${index}" aria-label="Remove ${escapeHtml(entry.file.name)}">×</button>
@@ -107,8 +102,10 @@ export async function renderActivePreview(entry, index) {
     await renderImage(entry, content, index);
   } else if (extension(entry.file.name) === "pdf") {
     await renderPdf(entry, content, strip, index);
-  } else if (extension(entry.file.name) === "docx" && window.docx) {
+  } else if (extension(entry.file.name) === "docx") {
     await renderDocx(entry, content);
+  } else if (extension(entry.file.name) === "doc") {
+    renderPlaceholder(entry, content, "Legacy .doc files cannot be previewed. We can still print this file.");
   } else if (["xls", "xlsx"].includes(extension(entry.file.name)) && window.XLSX) {
     await renderXlsx(entry, content);
   } else {
@@ -157,6 +154,39 @@ export function drawImagePreview(entry, canvas) {
     -sourceWidth / 2, -sourceHeight / 2,
     sourceWidth, sourceHeight);
   context.restore();
+}
+
+export function fitPreviewContent(content) {
+  const docxArea = content.querySelector(".docx-preview");
+  const docxTarget = docxArea?.querySelector(".docx-wrapper, .mammoth-preview");
+  if (docxTarget) fitElementToArea(docxTarget, docxArea);
+
+  const spreadsheetArea = content.querySelector(".xlsx-table");
+  const spreadsheet = spreadsheetArea?.querySelector("table");
+  if (spreadsheet) fitElementToArea(spreadsheet, spreadsheetArea);
+}
+
+function fitElementToArea(element, area) {
+  element.style.position = "absolute";
+  element.style.left = "50%";
+  element.style.top = "50%";
+  element.style.width = "max-content";
+  element.style.height = "max-content";
+  element.style.maxWidth = "none";
+  element.style.maxHeight = "none";
+  element.style.margin = "0";
+  element.style.transform = "translate(-50%, -50%)";
+  element.style.transformOrigin = "center center";
+
+  const bounds = element.getBoundingClientRect();
+  const width = Math.max(element.scrollWidth, bounds.width);
+  const height = Math.max(element.scrollHeight, bounds.height);
+  const availableWidth = area.clientWidth - 24;
+  const availableHeight = area.clientHeight - 24;
+  if (width <= 0 || height <= 0 || availableWidth <= 0 || availableHeight <= 0) return;
+
+  const scale = Math.min(1, availableWidth / width, availableHeight / height);
+  element.style.transform = `translate(-50%, -50%) scale(${scale})`;
 }
 
 async function renderPdf(entry, content, strip, index) {
@@ -247,18 +277,50 @@ export async function movePdfPage(entry, index, delta) {
 
 async function renderDocx(entry, content) {
   content.innerHTML = '<div class="preview-loading at-skeleton" aria-label="Loading Word document"></div>';
-  try {
-    content.innerHTML = '<div class="docx-preview"></div>';
-    await window.docx.renderAsync(await entry.file.arrayBuffer(), content.querySelector(".docx-preview"), null, {
-      inWrapper: true,
-      ignoreWidth: false,
-      ignoreHeight: false,
-      breakPages: true
-    });
-  } catch (error) {
-    console.error("DOCX preview failed.", error);
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  content.innerHTML = '<div class="docx-preview docx"></div>';
+  const container = content.querySelector(".docx-preview");
+  if (!container || !container.isConnected) {
+    console.error("DOCX preview failed: the preview container is not visible in the DOM.");
     renderError(content, "Document preview unavailable.", entry.file.name);
+    return;
   }
+  if (!window.JSZip) {
+    console.error("DOCX preview failed: window.JSZip is missing.");
+  } else if (!window.docx) {
+    console.error("DOCX preview failed: window.docx is missing.");
+  } else {
+    try {
+      await window.docx.renderAsync(await entry.file.arrayBuffer(), container, null, {
+        className: "docx",
+        inWrapper: true,
+        ignoreWidth: false,
+        ignoreHeight: false,
+        breakPages: true,
+        renderHeaders: true,
+        renderFooters: true
+      });
+      fitPreviewContent(content);
+      return;
+    } catch (error) {
+      console.error("DOCX preview failed in docx-preview:", error);
+    }
+  }
+
+  if (window.mammoth) {
+    try {
+      container.innerHTML = '<div class="mammoth-preview"></div>';
+      const result = await window.mammoth.convertToHtml({ arrayBuffer: await entry.file.arrayBuffer() });
+      container.querySelector(".mammoth-preview").innerHTML = result.value;
+      fitPreviewContent(content);
+      return;
+    } catch (error) {
+      console.error("DOCX fallback failed in mammoth:", error);
+    }
+  } else {
+    console.error("DOCX preview fallback failed: window.mammoth is missing.");
+  }
+  renderPlaceholder(entry, content);
 }
 
 async function renderXlsx(entry, content) {
@@ -271,6 +333,7 @@ async function renderXlsx(entry, content) {
     const renderSheet = (index) => {
       contentHost.querySelector(".xlsx-table").innerHTML = window.XLSX.utils.sheet_to_html(workbook.Sheets[sheetNames[index]], { editable: false });
       contentHost.querySelectorAll("[data-xlsx-sheet]").forEach((tab, tabIndex) => tab.setAttribute("aria-pressed", String(tabIndex === index)));
+      fitPreviewContent(content);
     };
     contentHost.querySelectorAll("[data-xlsx-sheet]").forEach((tab) => tab.addEventListener("click", () => renderSheet(Number(tab.dataset.xlsxSheet))));
     contentHost.classList.remove("at-skeleton");
@@ -280,9 +343,9 @@ async function renderXlsx(entry, content) {
   }
 }
 
-export function renderPlaceholder(entry, content) {
+export function renderPlaceholder(entry, content, note = "Preview isn't available for this file, but we can still print it.") {
   const ext = extension(entry.file.name).toUpperCase();
-  content.innerHTML = `<div class="preview-placeholder"><div class="preview-placeholder-inner"><div class="preview-placeholder-icon">${escapeHtml(ext.slice(0, 4))}</div><strong>${escapeHtml(entry.file.name)}</strong><span>${formatSize(entry.file.size)}</span><p>Preview not available for this file type. We can still print it.</p></div></div>`;
+  content.innerHTML = `<div class="preview-placeholder"><div class="preview-placeholder-inner"><div class="preview-placeholder-icon">${escapeHtml(ext.slice(0, 4))}</div><strong>${escapeHtml(entry.file.name)}</strong><span>${formatSize(entry.file.size)}</span><p>${escapeHtml(note)}</p></div></div>`;
 }
 
 function renderError(content, title, fileName) {

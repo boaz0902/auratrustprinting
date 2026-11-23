@@ -11,7 +11,9 @@
   <script>tailwind={config:{theme:{extend:{colors:{brand:{blue:"#2F6FED",indigo:"#3B3FD1",aqua:"#8FE0E3",slate:"#38434E",paper:"#F6F9FE"}},fontFamily:{heading:["Sora","sans-serif"],sans:["Inter","sans-serif"]}}}}};</script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.3.2/dist/docx-preview.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.3.3/dist/docx-preview.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
   <link rel="stylesheet" href="css/styles.css"><script type="module" src="js/order.js"></script>
@@ -19,11 +21,12 @@
 <body>
   <header class="site-header"><nav class="nav-shell" aria-label="Main navigation">
     <a class="brand-lockup" href="index.html"><span class="brand-mark-crop"><img src="assets/logos2.png" alt=""></span><span class="brand-wordmark"><strong>AURATRUST</strong><small>PRINTING &amp; DIGITAL SERVICES</small></span></a>
-    <div class="nav-links is-open"><a href="track.html">Track Order</a><a href="index.html">Price List</a></div>
+    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-nav" aria-label="Open navigation"><span></span><span></span></button>
+    <div class="nav-links" id="primary-nav"><a href="track.html">Track Order</a><a href="index.html">Price List</a></div>
   </nav></header>
   <main class="order-main">
     <div class="order-shell">
-      <div class="order-heading"><p class="eyebrow">AuraTrust · Online order</p><h1>Bring your files to life.</h1></div>
+      <div class="order-heading"><a class="order-back-link" href="index.html">← Back to price list</a><p class="eyebrow">AuraTrust · Online order</p><h1>Bring your files to life.</h1></div>
       <div class="wizard-progress" aria-label="Order progress"><div class="progress-track"><div id="progress-bar"></div></div><ol><li class="active" data-step="1"><span>1</span>Upload</li><li data-step="2"><span>2</span>Preview</li><li data-step="3"><span>3</span>Payment</li><li data-step="4"><span>4</span>Confirm</li></ol></div>
       <section class="wizard-step" data-panel="1" aria-labelledby="upload-title">
         <h2 id="upload-title">Upload your files</h2>
@@ -37,12 +40,12 @@
       </section>
       <section class="wizard-step" data-panel="2" hidden>
         <div class="step-two-heading">
-          <div><p class="eyebrow">File review</p><h2>Preview &amp; options</h2></div>
+          <div><p class="eyebrow">File review</p><h2>Preview &amp; options</h2><p class="preview-intro">Review each page, then choose the paper and print finish that feels right.</p></div>
           <span class="step-count" id="step-file-count">0 files</span>
         </div>
         <div id="preview-step2" class="preview-step2"></div>
         <div class="step-actions split"><button class="at-btn at-btn-secondary" type="button" data-back="1">← Back</button><button id="options-next" class="at-btn at-btn-primary" type="button">Continue to payment →</button></div>
-        <div class="mobile-step-bar" aria-label="Continue from preview"><div><span>Estimated total</span><strong id="mobile-live-total">₱0.00</strong></div><button id="options-next-mobile" class="at-btn at-btn-primary" type="button">Continue <span aria-hidden="true">→</span></button></div>
+        <div class="step2-sticky-summary" aria-label="Preview summary"><div class="step2-summary-meta"><span id="step2-file-count">0 files</span><strong id="mobile-live-total">₱0.00</strong></div><button id="options-next-mobile" class="at-btn at-btn-primary" type="button">Continue to payment <span aria-hidden="true">→</span></button></div>
       </section>
       <section class="wizard-step" data-panel="3" hidden>
         <h2>Summary & GCash payment</h2>
@@ -67,5 +70,8 @@
       </section>
     </div>
   </main>
+  <div id="preview-fullscreen" class="fullscreen-modal" role="dialog" aria-modal="true" aria-label="Fullscreen document preview">
+    <div class="fullscreen-sheet" id="fullscreen-sheet"><button class="at-icon-btn fullscreen-close" type="button" data-preview-action="close-fullscreen" aria-label="Close fullscreen preview">×</button></div>
+  </div>
 </body>
 </html>

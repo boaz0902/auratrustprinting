@@ -32,7 +32,11 @@ export async function getSmartDefaults(entry, services) {
   }
 
   const service = suggestService(entry.file, kind, services);
-  return { paper, color: color === "bw" ? "bw" : "color", service };
+  const variant = service?.variants?.find((item) =>
+    item.paper === paper && item.color === (color === "bw" ? "bw" : "color")
+  ) || service?.variants?.find((item) => item.label === service.suggested_variant)
+    || (service?.variants?.length === 1 ? service.variants[0] : null);
+  return { paper, color: color === "bw" ? "bw" : "color", service, variant };
 }
 
 function within(value, target, tolerance) {
@@ -47,25 +51,16 @@ export function suggestService(file, kind, services) {
   const imageKinds = new Set(["jpg", "jpeg", "png", "webp"]);
   const name = file.name.toLowerCase();
   if (imageKinds.has(kind)) {
-    if (name.includes("id")) {
-      return findService(services, ["id", "picture"]) || findService(services, ["photo"]);
+    if (/\b(id|passport|2x2|2×2)\b/.test(name)) {
+      return services.find((service) => service.id === "rush-id-prints");
     }
-    return findService(services, ["photo", "print"]) || findService(services, ["image"]);
+    return services.find((service) => service.id === "photo-prints");
   }
-  return findService(services, ["document", "printing", "photocopy"])
-    || findService(services, ["digital"]);
-}
-
-function findService(services, words) {
-  return services.find((service) => (service.file_kinds || []).some((kind) =>
-    words.includes(String(kind).toLowerCase())
-  )) || services.find((service) => {
-    const text = `${service.category || ""} ${service.name || ""}`.toLowerCase();
-    return words.every((word) => text.includes(word));
-  }) || services.find((service) => {
-    const text = `${service.category || ""} ${service.name || ""}`.toLower();
-    return words.some((word) => text.includes(word));
-  });
+  if (kind === "docx") return services.find((service) => service.id === "docx-text-only");
+  if (["pdf", "doc", "xls", "xlsx", "ppt", "pptx", "txt"].includes(kind)) {
+    return services.find((service) => service.id === "xerox");
+  }
+  return undefined;
 }
 
 async function detectPdfColor(pdf) {

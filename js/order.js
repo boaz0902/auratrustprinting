@@ -1,13 +1,29 @@
 import { gcashInfo, orderLimits } from "./config.js";
-import { createCustomerOrder, ensureAnonymousCustomer, getPublicPriceData, requireSupabase, uploadOrderFile } from "./supabase.js";
-import { sampleServices } from "./sample-data.js";
-import { renderWorkspace, renderFileRail, renderActivePreview, movePdfPage, drawImagePreview } from "./preview.js";
-import { initializeOptions, renderOptions, updateLiveSummary, calculateEstimate, getPageCount, getLinePrice, validatePages, showToast } from "./options.js";
+import { createCustomerOrder, ensureAnonymousCustomer, requireSupabase, uploadOrderFile } from "./supabase.js";
+import { priceList } from "./sample-data.js";
+import { renderWorkspace, renderFileRail, renderActivePreview, movePdfPage, drawImagePreview, fitPreviewContent } from "./preview.js";
+import { initializeOptions, renderOptions, updateLiveSummary, calculateEstimate, getPageCount, getPageIndices, getLinePrice, validatePages, showToast } from "./options.js";
 
 const currency = new Intl.NumberFormat("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const files = [];
 let services = [];
 let servicesReady = false;
+
+const menuToggle = document.querySelector(".menu-toggle");
+const navLinks = document.querySelector("#primary-nav");
+menuToggle.addEventListener("click", () => {
+  const expanded = menuToggle.getAttribute("aria-expanded") === "true";
+  menuToggle.setAttribute("aria-expanded", String(!expanded));
+  menuToggle.setAttribute("aria-label", expanded ? "Open navigation" : "Close navigation");
+  navLinks.classList.toggle("is-open", !expanded);
+});
+navLinks.addEventListener("click", (event) => {
+  if (event.target.closest("a")) {
+    menuToggle.setAttribute("aria-expanded", "false");
+    menuToggle.setAttribute("aria-label", "Open navigation");
+    navLinks.classList.remove("is-open");
+  }
+});
 
 if (window.pdfjsLib) {
   window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
@@ -95,7 +111,7 @@ function addFiles(selectedFiles) {
       continue;
     }
     if (files.some((entry) => entry.file.name === file.name && entry.file.size === file.size)) continue;
-    files.push({ file, progress: 0, options: { service: "", variantLabel: "", paper: "A4", copies: 1, color: "Color", sides: "Single-sided", pages: "All", notes: "" } });
+    files.push({ file, progress: 0, options: { service: "", variantLabel: "", addons: [], paper: "short", copies: 1, pageCount: "", pageRange: "", notes: "" } });
   }
   if (messages.length) uploadError.textContent = messages.join(" ");
   renderFileList();
@@ -249,21 +265,14 @@ function selectedService(entry) {
   return services.find((service, index) => serviceId(service, index) === entry.options.service);
 }
 
-function renderVariantSelect(entry, index) {
-  const service = selectedService(entry);
-  const variants = Array.isArray(service?.variants) ? service.variants : [];
-  const label = variants.length
-    ? `<label class="order-field"><span>Price option</span><select data-option="variantLabel" data-index="${index}" required><option value="">Choose an option</option>${variants.map((variant) => `<option value="${escapeHtml(variant.label)}" ${entry.options.variantLabel === variant.label ? "selected" : ""}>${escapeHtml(variant.label)} — ₱${currency.format(Number(variant.price))}</option>`).join("")}</select></label>`
-    : "";
-  return label;
-}
-
 const previewContext = { activeIndex: 0 };
 
 async function renderPreviews() {
   const container = document.querySelector("#preview-step2");
   renderWorkspace(container, files);
   document.querySelector("#step-file-count").textContent = `${files.length} file${files.length === 1 ? "" : "s"}`;
+  const stickyCount = document.querySelector("#step2-file-count");
+  if (stickyCount) stickyCount.textContent = `${files.length} file${files.length === 1 ? "" : "s"}`;
   files.forEach((entry) => { entry.isActive = false; });
   files[0].isActive = true;
   previewContext.activeIndex = 0;
@@ -303,6 +312,8 @@ document.querySelector("#preview-step2").addEventListener("click", async (event)
     renderOptions(files[previewContext.activeIndex], previewContext.activeIndex, files, services, previewContext);
     await renderActivePreview(files[previewContext.activeIndex], previewContext.activeIndex);
     document.querySelector("#step-file-count").textContent = `${files.length} file${files.length === 1 ? "" : "s"}`;
+    const stickyCount = document.querySelector("#step2-file-count");
+    if (stickyCount) stickyCount.textContent = `${files.length} file${files.length === 1 ? "" : "s"}`;
   }
 
   const action = event.target.closest("[data-preview-action]");
@@ -362,12 +373,11 @@ function openFullscreen(entry) {
   clone.classList.toggle("is-bw", document.querySelector("#preview-bw-switch")?.checked);
   fullscreen.querySelectorAll(".fullscreen-content").forEach((node) => node.remove());
   clone.classList.add("fullscreen-content");
-  clone.style.width = "min(760px,86%)";
-  clone.style.height = "calc(100% - 40px)";
   fullscreen.append(clone);
   modal.classList.add("is-open");
   modal.querySelector("[data-preview-action='close-fullscreen']").focus();
   document.body.style.overflow = "hidden";
+  requestAnimationFrame(() => fitPreviewContent(clone));
 }
 
 function closeFullscreen() {
@@ -376,6 +386,10 @@ function closeFullscreen() {
   document.querySelectorAll("#fullscreen-sheet .fullscreen-content").forEach((node) => node.remove());
   document.body.style.overflow = "";
 }
+
+document.querySelector("#preview-fullscreen").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget || event.target.closest("[data-preview-action='close-fullscreen']")) closeFullscreen();
+});
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeFullscreen();
@@ -391,7 +405,7 @@ async function processedFile(entry) {
   if (extension(entry.file.name) === "pdf" && entry.pdfOrder) {
     const source = await window.PDFLib.PDFDocument.load(await entry.file.arrayBuffer());
     const edited = await window.PDFLib.PDFDocument.create();
-    const pages = entry.pdfOrder.filter((page) => !entry.pdfDeleted.has(page));
+    const pages = getPageIndices(entry);
     if (!pages.length) throw new Error("A PDF must keep at least one page.");
     const copied = await edited.copyPages(source, pages);
     copied.forEach((page, position) => {
@@ -410,12 +424,14 @@ function pageCount(entry) {
 }
 
 function priceFor(entry) {
-  const service = selectedService(entry);
   const line = getLinePrice(entry, services);
-  if (!line.confirmed) return { service, variant: null, unitPrice: 0 };
-  const variants = Array.isArray(service?.variants) ? service.variants : [];
-  const variant = variants.find((item) => item.label === entry.options.variantLabel) || null;
-  return { service, variant, unitPrice: line.price };
+  return {
+    service: line.service || selectedService(entry),
+    variant: line.variant,
+    addons: line.addons,
+    unitPrice: line.price,
+    confirmed: line.confirmed
+  };
 }
 
 function calculateTotal() {
@@ -424,15 +440,20 @@ function calculateTotal() {
 
 function renderSummary() {
   const total = calculateTotal();
+  const needsQuote = files.some((entry) => !getLinePrice(entry, services).confirmed);
   const rows = files.map((entry) => {
-    const { service, variant, unitPrice } = priceFor(entry);
-    const quantity = pageCount(entry) * Number(entry.options.copies);
-    const line = getLinePrice(entry, services);
-    const label = `${service?.name || "Service to be confirmed"}${variant ? ` · ${variant.label}` : ""} · ${quantity} unit(s)`;
-    return `<div class="summary-row"><div><strong>${escapeHtml(entry.file.name)}</strong><span>${escapeHtml(label)}</span></div><strong>${line.confirmed ? `₱${currency.format(unitPrice * quantity)}` : "To be confirmed"}</strong></div>`;
+    const { service, variant, addons, unitPrice, confirmed } = priceFor(entry);
+    const copies = Math.max(1, Number(entry.options.copies || 1));
+    const quantity = service?.billing === "page" ? pageCount(entry) * copies : copies;
+    const optionLabel = [service?.name, variant?.label, ...(addons || []).map((addon) => addon.label)].filter(Boolean).join(" · ");
+    const unitLabel = service?.billing === "page" ? "page(s)" : String(service?.unit || "item(s)").replace(/^per\s+/i, "");
+    const label = `${optionLabel || "Service to be confirmed"} · ${quantity} ${unitLabel}`;
+    return `<div class="summary-row"><div><strong>${escapeHtml(entry.file.name)}</strong><span>${escapeHtml(label)}</span></div><strong>${confirmed ? `₱${currency.format(unitPrice * quantity)}` : "Price to be confirmed"}</strong></div>`;
   }).join("");
-  document.querySelector("#order-summary").innerHTML = `<h3>Estimated breakdown</h3>${rows}<div class="summary-total"><span>Estimated total</span><strong>₱${currency.format(total)}</strong></div><p class="summary-note">The final price is confirmed by the shop. This estimate uses the selected service, options, copies, and page range.</p>`;
-  document.querySelector("#gcash-exact").textContent = `Exact amount: ₱${currency.format(total)}`;
+  document.querySelector("#order-summary").innerHTML = `<h3>Estimated breakdown</h3>${rows}<div class="summary-total"><span>${needsQuote ? "Priced items subtotal" : "Estimated total"}</span><strong>₱${currency.format(total)}${needsQuote ? " + quote" : ""}</strong></div><p class="summary-note">${needsQuote ? "Some selected options have no posted price. Confirm the final amount with AuraTrust before paying." : "This estimate uses the selected service, options, and quantity."}</p>`;
+  document.querySelector("#gcash-exact").textContent = needsQuote
+    ? "Confirm the final amount with AuraTrust before paying"
+    : `Exact amount: ₱${currency.format(total)}`;
   return total;
 }
 
@@ -443,15 +464,22 @@ document.querySelector("#upload-next").addEventListener("click", () => {
 });
 
 function continueFromOptions() {
-  const selects = [...document.querySelectorAll('[data-option="service"], [data-option="variantLabel"]')];
-  const missing = selects.find((select) => !select.value);
-  if (missing) {
-    missing.focus();
-    missing.reportValidity();
-    return;
+  for (const entry of files) {
+    const line = getLinePrice(entry, services);
+    if (!line.service || line.reason === "Choose an option to see its price.") {
+      showToast(line.reason || "Choose a service for " + entry.file.name + ".");
+      return;
+    }
+    if (line.service.billing === "page" && extension(entry.file.name) !== "pdf" && !Number(entry.options.pageCount)) {
+      showToast("Enter number of pages for " + entry.file.name + ".");
+      return;
+    }
+    if (!validatePages(entry)) {
+      showToast(entry.pageRangeError || "Check the page range.");
+      return;
+    }
   }
   try {
-    const total = calculateEstimate(files, services);
     renderSummary();
     setStep(3);
   } catch (error) {
@@ -598,21 +626,7 @@ document.querySelector("#payment-form").elements.receipt.addEventListener("chang
 });
 
 async function loadServices() {
-  try {
-    const data = await getPublicPriceData();
-    services = data.services.length ? data.services : sampleServices.filter((service) => service.visible);
-  } catch (error) {
-    console.error("Unable to load prices for the order form.", error);
-    services = sampleServices.filter((service) => service.visible);
-  }
-  if (!services.some((service) => service.id)) {
-    services = services.map((service, index) => ({
-      ...service,
-      id: `sample-${index}`,
-      paper_size: null,
-      color_mode: null
-    }));
-  }
+  services = priceList.filter((service) => service.visible);
   if (!services.length) {
     document.querySelector("#order-service-error").hidden = false;
   }
