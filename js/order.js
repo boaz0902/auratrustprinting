@@ -1,7 +1,7 @@
 import { gcashInfo, orderLimits } from "./config.js";
 import { createCustomerOrder, ensureAnonymousCustomer, requireSupabase, uploadOrderFile } from "./supabase.js";
 import { priceList } from "./sample-data.js";
-import { renderWorkspace, renderFileRail, renderActivePreview, movePdfPage, drawImagePreview, fitPreviewContent } from "./preview.js";
+import { renderWorkspace, renderFileRail, renderActivePreview, renderPdfPage, movePdfPage, drawImagePreview, fitPreviewContent, updatePdfPan, clampPdfFocus, updatePaperPreview } from "./preview.js";
 import { initializeOptions, renderOptions, updateLiveSummary, calculateEstimate, getPageCount, getPageIndices, getLinePrice, validatePages, showToast } from "./options.js";
 
 const currency = new Intl.NumberFormat("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -97,6 +97,16 @@ function renderFileList() {
   document.querySelector("#upload-next").disabled = files.length === 0 || !servicesReady;
 }
 
+function releaseFilePreview(entry) {
+  if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl);
+  entry.previewUrl = null;
+  entry.pdf = null;
+  entry.image = null;
+  entry.options = null;
+  entry.manual = null;
+  entry.suggestions = null;
+}
+
 function addFiles(selectedFiles) {
   uploadError.textContent = "";
   const messages = [];
@@ -140,7 +150,7 @@ fileList.addEventListener("click", (event) => {
   const button = event.target.closest("[data-remove]");
   if (!button) return;
   const [removed] = files.splice(Number(button.dataset.remove), 1);
-  if (removed.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+  releaseFilePreview(removed);
   renderFileList();
 });
 
@@ -282,9 +292,46 @@ async function renderPreviews() {
 }
 
 document.querySelector("#preview-step2").addEventListener("click", async (event) => {
+  const remove = event.target.closest("[data-preview-remove]");
+  if (remove) {
+    event.preventDefault();
+    event.stopPropagation();
+    const removedIndex = Number(remove.dataset.previewRemove);
+    if (!Number.isInteger(removedIndex) || !files[removedIndex]) return;
+    if (fullscreenIsOpen()) closeFullscreen();
+    const activeEntry = files[previewContext.activeIndex];
+    const [removed] = files.splice(removedIndex, 1);
+    releaseFilePreview(removed);
+
+    if (!files.length) {
+      previewContext.activeIndex = 0;
+      document.querySelector("#preview-options").replaceChildren();
+      document.querySelector("#preview-step2").replaceChildren();
+      document.querySelector("#step-file-count").textContent = "0 files";
+      updateLiveSummary(files, services);
+      setStep(1);
+      renderFileList();
+      return;
+    }
+
+    previewContext.activeIndex = activeEntry === removed
+      ? Math.min(removedIndex, files.length - 1)
+      : files.indexOf(activeEntry);
+    if (previewContext.activeIndex < 0) previewContext.activeIndex = 0;
+    files.forEach((entry) => { entry.isActive = false; });
+    const nextEntry = files[previewContext.activeIndex];
+    nextEntry.isActive = true;
+    renderFileList();
+    renderFileRail(files, previewContext.activeIndex);
+    renderOptions(nextEntry, previewContext.activeIndex, files, services, previewContext);
+    await renderActivePreview(nextEntry, previewContext.activeIndex);
+    document.querySelector("#step-file-count").textContent = `${files.length} file${files.length === 1 ? "" : "s"}`;
+    updateLiveSummary(files, services);
+    return;
+  }
+
   const card = event.target.closest("[data-preview-file]");
   if (card) {
-    if (event.target.closest("[data-preview-remove]")) return;
     const nextIndex = Number(card.dataset.previewFile);
     files.forEach((entry) => { entry.isActive = false; });
     files[nextIndex].isActive = true;
@@ -294,44 +341,32 @@ document.querySelector("#preview-step2").addEventListener("click", async (event)
     await renderActivePreview(files[nextIndex], nextIndex);
   }
 
-  const remove = event.target.closest("[data-preview-remove]");
-  if (remove) {
-    const removedIndex = Number(remove.dataset.previewRemove);
-    const [removed] = files.splice(removedIndex, 1);
-    if (removed.previewUrl) URL.revokeObjectURL(removed.previewUrl);
-    if (!files.length) {
-      setStep(1);
-      renderFileList();
-      return;
-    }
-    renderFileList();
-    previewContext.activeIndex = Math.min(removedIndex, files.length - 1);
-    files.forEach((entry) => { entry.isActive = false; });
-    files[previewContext.activeIndex].isActive = true;
-    renderFileRail(files, previewContext.activeIndex);
-    renderOptions(files[previewContext.activeIndex], previewContext.activeIndex, files, services, previewContext);
-    await renderActivePreview(files[previewContext.activeIndex], previewContext.activeIndex);
-    document.querySelector("#step-file-count").textContent = `${files.length} file${files.length === 1 ? "" : "s"}`;
-    const stickyCount = document.querySelector("#step2-file-count");
-    if (stickyCount) stickyCount.textContent = `${files.length} file${files.length === 1 ? "" : "s"}`;
-  }
-
   const action = event.target.closest("[data-preview-action]");
   if (action) {
     const entry = files[previewContext.activeIndex];
-    const sheet = document.querySelector("#preview-sheet");
-    const zoomLabel = document.querySelector("#preview-zoom-label");
-    entry.previewZoom ||= 1;
-    if (action.dataset.previewAction === "zoom-in") entry.previewZoom = Math.min(2.5, entry.previewZoom + 0.15);
-    if (action.dataset.previewAction === "zoom-out") entry.previewZoom = Math.max(0.6, entry.previewZoom - 0.15);
-    if (action.dataset.previewAction === "fit") entry.previewZoom = 1;
-    if (["zoom-in", "zoom-out", "fit"].includes(action.dataset.previewAction)) {
-      sheet.style.transform = `scale(${entry.previewZoom})`;
-      if (zoomLabel) zoomLabel.textContent = `${Math.round(entry.previewZoom * 100)}%`;
+    if (!entry) return;
+    if (!Number.isFinite(entry.previewZoom)) entry.previewZoom = 1;
+    if (entry.pdf && ["zoom-in", "zoom-out", "fit"].includes(action.dataset.previewAction)) {
+      if (action.dataset.previewAction === "fit") {
+        entry.previewZoom = 1;
+        entry.pdfFocusX = 0.5;
+        entry.pdfFocusY = 0.5;
+        await renderPdfViews(entry, previewContext.activeIndex);
+      } else {
+        const factor = action.dataset.previewAction === "zoom-in" ? 1.2 : 1 / 1.2;
+        await changePdfZoom(entry, previewContext.activeIndex, factor, document.querySelector("#preview-sheet-content"));
+      }
+    } else if (["zoom-in", "zoom-out", "fit"].includes(action.dataset.previewAction)) {
+      if (action.dataset.previewAction === "zoom-in") entry.previewZoom = Math.min(2.5, entry.previewZoom + 0.15);
+      if (action.dataset.previewAction === "zoom-out") entry.previewZoom = Math.max(0.6, entry.previewZoom - 0.15);
+      if (action.dataset.previewAction === "fit") entry.previewZoom = 1;
+      fitPreviewContent(document.querySelector("#preview-sheet-content"), entry.previewZoom);
+      if (fullscreenIsOpen()) fitPreviewContent(document.querySelector("#fullscreen-paper-content"), entry.previewZoom);
+      syncPreviewZoomLabel(entry);
     }
-    if (action.dataset.previewAction === "previous") await movePdfPage(entry, previewContext.activeIndex, -1);
-    if (action.dataset.previewAction === "next") await movePdfPage(entry, previewContext.activeIndex, 1);
-    if (action.dataset.previewAction === "fullscreen") openFullscreen(entry);
+    if (action.dataset.previewAction === "previous") await changePdfPage(entry, previewContext.activeIndex, -1);
+    if (action.dataset.previewAction === "next") await changePdfPage(entry, previewContext.activeIndex, 1);
+    if (action.dataset.previewAction === "fullscreen") await openFullscreen(entry, previewContext.activeIndex);
     if (action.dataset.previewAction === "close-fullscreen") closeFullscreen();
   }
 
@@ -339,7 +374,9 @@ document.querySelector("#preview-step2").addEventListener("click", async (event)
   if (thumb) {
     const entry = files[previewContext.activeIndex];
     entry.pdfCurrentPosition = Number(thumb.dataset.pdfPosition);
-    await renderActivePreview(entry, previewContext.activeIndex);
+    entry.pdfFocusX = 0.5;
+    entry.pdfFocusY = 0.5;
+    await renderPdfViews(entry, previewContext.activeIndex);
   }
 
   const imageAction = event.target.closest("[data-image-action]");
@@ -365,30 +402,220 @@ document.querySelector("#preview-step2").addEventListener("change", (event) => {
   }
 });
 
-function openFullscreen(entry) {
+function fullscreenIsOpen() {
+  return document.querySelector("#preview-fullscreen")?.classList.contains("is-open") || false;
+}
+
+function syncPreviewZoomLabel(entry) {
+  const label = `${Math.round((entry.previewZoom || 1) * 100)}%`;
+  document.querySelectorAll(".zoom-label").forEach((node) => { node.textContent = label; });
+}
+
+async function renderPdfViews(entry, index) {
+  updatePaperPreview(entry.options?.paper);
+  await renderPdfPage(entry, document.querySelector("#preview-sheet-content"), index);
+  if (fullscreenIsOpen()) {
+    const stage = document.querySelector("#fullscreen-paper-stage");
+    const sheet = document.querySelector("#fullscreen-paper");
+    const content = document.querySelector("#fullscreen-paper-content");
+    updatePaperPreview(entry.options?.paper, sheet, stage);
+    await renderPdfPage(entry, content, index, sheet, stage);
+  }
+  syncPreviewZoomLabel(entry);
+}
+
+async function changePdfPage(entry, index, delta) {
+  await movePdfPage(entry, index, delta);
+  if (fullscreenIsOpen()) {
+    await renderPdfPage(
+      entry,
+      document.querySelector("#fullscreen-paper-content"),
+      index,
+      document.querySelector("#fullscreen-paper"),
+      document.querySelector("#fullscreen-paper-stage")
+    );
+  }
+}
+
+async function changePdfZoom(entry, index, factor, content, anchor = { x: 0.5, y: 0.5 }) {
+  const canvas = content?.querySelector(".pdf-preview-canvas");
+  const oldZoom = entry.previewZoom || 1;
+  const nextZoom = Math.max(0.4, Math.min(5, oldZoom * factor));
+  if (canvas && nextZoom !== oldZoom) {
+    const width = parseFloat(canvas.style.width) || canvas.clientWidth;
+    const height = parseFloat(canvas.style.height) || canvas.clientHeight;
+    const sourceX = (entry.pdfFocusX ?? 0.5) + (anchor.x - 0.5) * content.clientWidth / width;
+    const sourceY = (entry.pdfFocusY ?? 0.5) + (anchor.y - 0.5) * content.clientHeight / height;
+    const scale = nextZoom / oldZoom;
+    entry.pdfFocusX = clampPdfFocus(sourceX - (anchor.x - 0.5) * content.clientWidth / (width * scale), width * scale, content.clientWidth);
+    entry.pdfFocusY = clampPdfFocus(sourceY - (anchor.y - 0.5) * content.clientHeight / (height * scale), height * scale, content.clientHeight);
+  }
+  entry.previewZoom = nextZoom;
+  await renderPdfViews(entry, index);
+}
+
+async function openFullscreen(entry, index) {
   const modal = document.querySelector("#preview-fullscreen");
-  const fullscreen = document.querySelector("#fullscreen-sheet");
+  const fullscreen = document.querySelector("#fullscreen-paper");
+  const stage = document.querySelector("#fullscreen-paper-stage");
   const content = document.querySelector("#preview-sheet-content");
   const clone = content.cloneNode(true);
+  clone.removeAttribute("id");
+  clone.id = "fullscreen-paper-content";
   clone.classList.toggle("is-bw", document.querySelector("#preview-bw-switch")?.checked);
-  fullscreen.querySelectorAll(".fullscreen-content").forEach((node) => node.remove());
   clone.classList.add("fullscreen-content");
-  fullscreen.append(clone);
+  fullscreen.replaceChildren(clone);
   modal.classList.add("is-open");
-  modal.querySelector("[data-preview-action='close-fullscreen']").focus();
   document.body.style.overflow = "hidden";
-  requestAnimationFrame(() => fitPreviewContent(clone));
+  modal.querySelectorAll(".pdf-only").forEach((control) => { control.hidden = !entry.pdf; });
+  updatePaperPreview(entry.options?.paper, fullscreen, stage);
+  if (entry.pdf) {
+    await renderPdfPage(entry, clone, index, fullscreen, stage);
+    syncPreviewZoomLabel(entry);
+  } else {
+    fitPreviewContent(clone, entry.previewZoom || 1);
+    syncPreviewZoomLabel(entry);
+  }
+  modal.querySelector("[data-preview-action='close-fullscreen']").focus();
 }
 
 function closeFullscreen() {
   const modal = document.querySelector("#preview-fullscreen");
+  const entry = files[previewContext.activeIndex];
+  if (entry?.pdf) updatePdfPan(entry, document.querySelector("#preview-sheet-content"));
   modal?.classList.remove("is-open");
-  document.querySelectorAll("#fullscreen-sheet .fullscreen-content").forEach((node) => node.remove());
+  document.querySelector("#fullscreen-paper")?.replaceChildren();
   document.body.style.overflow = "";
 }
 
-document.querySelector("#preview-fullscreen").addEventListener("click", (event) => {
-  if (event.target === event.currentTarget || event.target.closest("[data-preview-action='close-fullscreen']")) closeFullscreen();
+document.querySelector("#preview-fullscreen").addEventListener("click", async (event) => {
+  if (event.target === event.currentTarget) {
+    closeFullscreen();
+    return;
+  }
+  const action = event.target.closest("[data-preview-action]");
+  if (!action) return;
+  if (action.dataset.previewAction === "close-fullscreen") {
+    closeFullscreen();
+    return;
+  }
+  const entry = files[previewContext.activeIndex];
+  if (!entry) return;
+  if (action.dataset.previewAction === "zoom-in" || action.dataset.previewAction === "zoom-out") {
+    if (entry.pdf) {
+      const factor = action.dataset.previewAction === "zoom-in" ? 1.2 : 1 / 1.2;
+      await changePdfZoom(entry, previewContext.activeIndex, factor, document.querySelector("#fullscreen-paper-content"));
+    } else {
+      const delta = action.dataset.previewAction === "zoom-in" ? 0.15 : -0.15;
+      entry.previewZoom = Math.max(0.6, Math.min(2.5, (entry.previewZoom || 1) + delta));
+      fitPreviewContent(document.querySelector("#preview-sheet-content"), entry.previewZoom);
+      fitPreviewContent(document.querySelector("#fullscreen-paper-content"), entry.previewZoom);
+      syncPreviewZoomLabel(entry);
+    }
+    return;
+  }
+  if (action.dataset.previewAction === "fit") {
+    entry.previewZoom = 1;
+    if (entry.pdf) {
+      entry.pdfFocusX = 0.5;
+      entry.pdfFocusY = 0.5;
+      await renderPdfViews(entry, previewContext.activeIndex);
+    } else {
+      fitPreviewContent(document.querySelector("#preview-sheet-content"), 1);
+      fitPreviewContent(document.querySelector("#fullscreen-paper-content"), 1);
+      syncPreviewZoomLabel(entry);
+    }
+    return;
+  }
+  if (!entry.pdf) return;
+  if (action.dataset.previewAction === "previous") await changePdfPage(entry, previewContext.activeIndex, -1);
+  if (action.dataset.previewAction === "next") await changePdfPage(entry, previewContext.activeIndex, 1);
+});
+
+document.querySelector("#preview-step2").addEventListener("change", async (event) => {
+  if (!["service", "variantLabel"].includes(event.target.dataset.option)) return;
+  const entry = files[previewContext.activeIndex];
+  if (!entry) return;
+  updatePaperPreview(entry.options?.paper);
+  if (fullscreenIsOpen()) updatePaperPreview(entry.options?.paper, document.querySelector("#fullscreen-paper"), document.querySelector("#fullscreen-paper-stage"));
+  if (entry.pdf) await renderPdfViews(entry, previewContext.activeIndex);
+  else {
+    fitPreviewContent(document.querySelector("#preview-sheet-content"), entry.previewZoom || 1);
+    if (fullscreenIsOpen()) fitPreviewContent(document.querySelector("#fullscreen-paper-content"), entry.previewZoom || 1);
+  }
+});
+
+let pdfDrag = null;
+document.addEventListener("pointerdown", (event) => {
+  const canvas = event.target.closest(".pdf-preview-canvas");
+  const entry = files[previewContext.activeIndex];
+  if (!canvas || !entry?.pdf || event.button !== 0) return;
+  const content = canvas.closest(".preview-sheet-content");
+  const width = parseFloat(canvas.style.width) || canvas.clientWidth;
+  const height = parseFloat(canvas.style.height) || canvas.clientHeight;
+  pdfDrag = {
+    canvas,
+    content,
+    entry,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    focusX: entry.pdfFocusX ?? 0.5,
+    focusY: entry.pdfFocusY ?? 0.5,
+    width,
+    height
+  };
+  canvas.setPointerCapture(event.pointerId);
+  content.classList.add("is-panning");
+  event.preventDefault();
+});
+
+document.addEventListener("pointermove", (event) => {
+  if (!pdfDrag || event.pointerId !== pdfDrag.pointerId) return;
+  const deltaX = event.clientX - pdfDrag.startX;
+  const deltaY = event.clientY - pdfDrag.startY;
+  pdfDrag.entry.pdfFocusX = clampPdfFocus(pdfDrag.focusX - deltaX / pdfDrag.width, pdfDrag.width, pdfDrag.content.clientWidth);
+  pdfDrag.entry.pdfFocusY = clampPdfFocus(pdfDrag.focusY - deltaY / pdfDrag.height, pdfDrag.height, pdfDrag.content.clientHeight);
+  updatePdfPan(pdfDrag.entry, document.querySelector("#preview-sheet-content"));
+  if (fullscreenIsOpen()) updatePdfPan(pdfDrag.entry, document.querySelector("#fullscreen-paper-content"));
+});
+
+function endPdfDrag(event) {
+  if (!pdfDrag || (event && event.pointerId !== pdfDrag.pointerId)) return;
+  pdfDrag.content.classList.remove("is-panning");
+  if (pdfDrag.canvas.hasPointerCapture(pdfDrag.pointerId)) pdfDrag.canvas.releasePointerCapture(pdfDrag.pointerId);
+  pdfDrag = null;
+}
+
+document.addEventListener("pointerup", endPdfDrag);
+document.addEventListener("pointercancel", endPdfDrag);
+
+document.addEventListener("wheel", (event) => {
+  if (!event.ctrlKey) return;
+  const canvas = event.target.closest(".pdf-preview-canvas");
+  const entry = files[previewContext.activeIndex];
+  if (!canvas || !entry?.pdf) return;
+  const content = canvas.closest(".preview-sheet-content");
+  const bounds = content.getBoundingClientRect();
+  const anchor = {
+    x: Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)),
+    y: Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height))
+  };
+  event.preventDefault();
+  const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+  changePdfZoom(entry, previewContext.activeIndex, factor, content, anchor);
+}, { passive: false });
+
+let pdfResizeTimer;
+window.addEventListener("resize", () => {
+  const entry = files[previewContext.activeIndex];
+  if (!entry) return;
+  clearTimeout(pdfResizeTimer);
+  pdfResizeTimer = setTimeout(async () => {
+    updatePaperPreview(entry.options?.paper);
+    if (fullscreenIsOpen()) updatePaperPreview(entry.options?.paper, document.querySelector("#fullscreen-paper"), document.querySelector("#fullscreen-paper-stage"));
+    if (entry.pdf) await renderPdfViews(entry, previewContext.activeIndex);
+  }, 100);
 });
 
 document.addEventListener("keydown", (event) => {
@@ -488,7 +715,6 @@ function continueFromOptions() {
 }
 
 document.querySelector("#options-next").addEventListener("click", continueFromOptions);
-document.querySelector("#options-next-mobile").addEventListener("click", continueFromOptions);
 document.querySelectorAll("[data-back]").forEach((button) => button.addEventListener("click", () => setStep(Number(button.dataset.back))));
 
 document.querySelector("#gcash-name").textContent = gcashInfo.name;

@@ -20,13 +20,14 @@ export const gcashInfo = {
 export const orderLimits = {
   maxFileSizeMB: 25,
   maxFiles: 10,
-  allowedExtensions: ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "jpg", "jpeg", "png", "webp", "txt"],
+  allowedExtensions: ["pdf", "doc", "docx", "xls", "xlsx", "csv", "ppt", "pptx", "jpg", "jpeg", "png", "webp", "txt"],
   allowedMimeTypes: [
     "application/pdf",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.ms-excel",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/csv",
     "application/vnd.ms-powerpoint",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "image/jpeg",

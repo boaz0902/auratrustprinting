@@ -15,6 +15,37 @@ export function extension(name) {
   return name.split(".").pop().toLowerCase();
 }
 
+export const PAPER_SIZES = {
+  short: { width: 8.5, height: 11 },
+  letter: { width: 8.5, height: 11 },
+  long: { width: 8.5, height: 13 },
+  legal: { width: 8.5, height: 14 },
+  a4: { width: 8.27, height: 11.69 },
+  a3: { width: 11.69, height: 16.54 }
+};
+
+export function normalizePaper(value) {
+  const paper = String(value || "").trim().toLowerCase();
+  return PAPER_SIZES[paper] ? paper : "short";
+}
+
+export function updatePaperPreview(paper, sheet = document.querySelector("#preview-sheet"), stage = document.querySelector("#preview-canvas-wrap")) {
+  if (!sheet || !stage) return;
+  const key = normalizePaper(paper);
+  const stageStyle = getComputedStyle(stage);
+  const horizontalPadding = parseFloat(stageStyle.paddingLeft) + parseFloat(stageStyle.paddingRight);
+  const verticalPadding = parseFloat(stageStyle.paddingTop) + parseFloat(stageStyle.paddingBottom);
+  const availableWidth = Math.max(0, stage.clientWidth - horizontalPadding);
+  const availableHeight = Math.max(0, stage.clientHeight - verticalPadding);
+  if (availableWidth <= 0 || availableHeight <= 0) return;
+  sheet.dataset.paper = key;
+  sheet.style.aspectRatio = "auto";
+  sheet.style.width = `${availableWidth}px`;
+  sheet.style.height = `${availableHeight}px`;
+  sheet.style.maxWidth = "100%";
+  sheet.style.maxHeight = "100%";
+}
+
 export function renderWorkspace(container, files) {
   container.innerHTML = `
     <div class="preview-workspace">
@@ -93,8 +124,12 @@ export async function renderActivePreview(entry, index) {
   const sheet = document.querySelector("#preview-sheet");
   const strip = document.querySelector("#preview-page-strip");
   if (!content || !sheet) return;
-  const paper = String(entry.options?.paper || "short").toLowerCase();
-  sheet.dataset.paper = ["short", "a4", "long", "a3"].includes(paper) ? paper : "short";
+  updatePaperPreview(entry.options?.paper);
+  sheet.style.transform = "none";
+  const zoomLabel = document.querySelector("#preview-zoom-label");
+  if (zoomLabel) zoomLabel.textContent = `${Math.round((entry.previewZoom || 1) * 100)}%`;
+  const pageLabel = document.querySelector("#preview-page-label");
+  if (pageLabel) pageLabel.textContent = "Page 1";
   content.innerHTML = '<div class="preview-loading at-skeleton" aria-label="Loading preview"></div>';
   strip.innerHTML = "";
 
@@ -106,11 +141,15 @@ export async function renderActivePreview(entry, index) {
     await renderDocx(entry, content);
   } else if (extension(entry.file.name) === "doc") {
     renderPlaceholder(entry, content, "Legacy .doc files cannot be previewed. We can still print this file.");
-  } else if (["xls", "xlsx"].includes(extension(entry.file.name)) && window.XLSX) {
+  } else if (extension(entry.file.name) === "txt") {
+    const text = await entry.file.text();
+    content.innerHTML = `<pre class="text-preview">${escapeHtml(text)}</pre>`;
+  } else if (["xls", "xlsx", "csv"].includes(extension(entry.file.name)) && window.XLSX) {
     await renderXlsx(entry, content);
   } else {
     renderPlaceholder(entry, content);
   }
+  if (!entry.pdf) fitPreviewContent(content, entry.previewZoom || 1);
 }
 
 async function renderImage(entry, content) {
@@ -156,17 +195,33 @@ export function drawImagePreview(entry, canvas) {
   context.restore();
 }
 
-export function fitPreviewContent(content) {
+export function fitPreviewContent(content, zoom = 1) {
+  if (!content) return;
   const docxArea = content.querySelector(".docx-preview");
-  const docxTarget = docxArea?.querySelector(".docx-wrapper, .mammoth-preview");
-  if (docxTarget) fitElementToArea(docxTarget, docxArea);
+  const docxTarget = docxArea?.querySelector(".docx-pages, .mammoth-preview");
+  if (docxTarget) fitElementToArea(docxTarget, docxArea, zoom);
 
   const spreadsheetArea = content.querySelector(".xlsx-table");
   const spreadsheet = spreadsheetArea?.querySelector("table");
-  if (spreadsheet) fitElementToArea(spreadsheet, spreadsheetArea);
+  if (spreadsheet) fitElementToArea(spreadsheet, spreadsheetArea, zoom);
+
+  const image = content.querySelector("#preview-image-canvas");
+  if (image) image.style.transform = `scale(${zoom})`;
+
+  const text = content.querySelector(".text-preview");
+  if (text) {
+    text.style.transform = `scale(${zoom})`;
+    text.style.transformOrigin = "center center";
+  }
+
+  const placeholder = content.querySelector(".preview-placeholder, .preview-error");
+  if (placeholder) {
+    placeholder.style.transform = `scale(${zoom})`;
+    placeholder.style.transformOrigin = "center center";
+  }
 }
 
-function fitElementToArea(element, area) {
+function fitElementToArea(element, area, zoom = 1) {
   element.style.position = "absolute";
   element.style.left = "50%";
   element.style.top = "50%";
@@ -186,7 +241,7 @@ function fitElementToArea(element, area) {
   if (width <= 0 || height <= 0 || availableWidth <= 0 || availableHeight <= 0) return;
 
   const scale = Math.min(1, availableWidth / width, availableHeight / height);
-  element.style.transform = `translate(-50%, -50%) scale(${scale})`;
+  element.style.transform = `translate(-50%, -50%) scale(${scale * zoom})`;
 }
 
 async function renderPdf(entry, content, strip, index) {
@@ -201,6 +256,9 @@ async function renderPdf(entry, content, strip, index) {
     entry.pdfDeleted ||= new Set();
     entry.pdfOrder ||= Array.from({ length: pdf.numPages }, (_, page) => page);
     entry.pdfRotations ||= new Map();
+    entry.previewZoom = Number.isFinite(entry.previewZoom) ? entry.previewZoom : 1;
+    entry.pdfFocusX = Number.isFinite(entry.pdfFocusX) ? entry.pdfFocusX : 0.5;
+    entry.pdfFocusY = Number.isFinite(entry.pdfFocusY) ? entry.pdfFocusY : 0.5;
     const pages = entry.pdfOrder.filter((page) => !entry.pdfDeleted.has(page));
     strip.innerHTML = "";
 
@@ -240,38 +298,71 @@ async function renderPdf(entry, content, strip, index) {
   }
 }
 
-async function renderPdfPage(entry, content, index) {
+export async function renderPdfPage(entry, content, index, sheet = document.querySelector("#preview-sheet"), stage = document.querySelector("#preview-canvas-wrap")) {
   const pages = entry.pdfOrder.filter((page) => !entry.pdfDeleted.has(page));
   if (!pages.length) throw new Error("Keep at least one PDF page.");
   entry.pdfCurrentPosition = Math.min(entry.pdfCurrentPosition || 0, pages.length - 1);
   const pageIndex = pages[entry.pdfCurrentPosition];
   const page = await entry.pdf.getPage(pageIndex + 1);
   const rotation = (page.rotate + (entry.pdfRotations.get(pageIndex) || 0)) % 360;
+  const paperKey = normalizePaper(entry.options?.paper);
+  updatePaperPreview(paperKey, sheet, stage);
+  const zoom = Number.isFinite(entry.previewZoom) ? entry.previewZoom : 1;
   const baseViewport = page.getViewport({ scale: 1, rotation });
-  const sheet = document.querySelector("#preview-sheet");
-  const availableWidth = sheet?.clientWidth || 420;
-  const scale = Math.min(1.7, availableWidth / baseViewport.width);
-  const viewport = page.getViewport({ scale, rotation });
+  const fitScale = Math.min(content.clientWidth / baseViewport.width, content.clientHeight / baseViewport.height);
+  const viewport = page.getViewport({ scale: fitScale * zoom, rotation });
+  const outputScale = Math.min(window.devicePixelRatio || 1, 2.5);
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(viewport.width * (window.devicePixelRatio || 1));
-  canvas.height = Math.round(viewport.height * (window.devicePixelRatio || 1));
+  canvas.className = "pdf-preview-canvas";
+  canvas.width = Math.max(1, Math.round(viewport.width * outputScale));
+  canvas.height = Math.max(1, Math.round(viewport.height * outputScale));
   canvas.style.width = `${viewport.width}px`;
   canvas.style.height = `${viewport.height}px`;
+  const renderToken = (content._pdfRenderToken || 0) + 1;
+  content._pdfRenderToken = renderToken;
   await page.render({
     canvasContext: canvas.getContext("2d"),
     viewport,
-    transform: window.devicePixelRatio > 1 ? [window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0] : null
+    transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null
   }).promise;
+  if (content._pdfRenderToken !== renderToken) return;
   content.replaceChildren(canvas);
   const label = document.querySelector("#preview-page-label");
   if (label) label.textContent = `Page ${entry.pdfCurrentPosition + 1} of ${pages.length}`;
+  const fullscreenLabel = document.querySelector("#fullscreen-page-label");
+  if (fullscreenLabel) fullscreenLabel.textContent = `Page ${entry.pdfCurrentPosition + 1} of ${pages.length}`;
   document.querySelectorAll("[data-pdf-position]").forEach((thumb, position) => thumb.classList.toggle("is-active", position === entry.pdfCurrentPosition));
+  document.querySelectorAll("[data-preview-action='previous']").forEach((button) => { button.disabled = entry.pdfCurrentPosition === 0; });
+  document.querySelectorAll("[data-preview-action='next']").forEach((button) => { button.disabled = entry.pdfCurrentPosition >= pages.length - 1; });
+  updatePdfPan(entry, content);
+}
+
+export function updatePdfPan(entry, content) {
+  const canvas = content?.querySelector(".pdf-preview-canvas");
+  if (!canvas) return;
+  const viewWidth = content.clientWidth;
+  const viewHeight = content.clientHeight;
+  const canvasWidth = parseFloat(canvas.style.width) || canvas.clientWidth;
+  const canvasHeight = parseFloat(canvas.style.height) || canvas.clientHeight;
+  const focusX = clampPdfFocus(entry.pdfFocusX ?? 0.5, canvasWidth, viewWidth);
+  const focusY = clampPdfFocus(entry.pdfFocusY ?? 0.5, canvasHeight, viewHeight);
+  const panX = (0.5 - focusX) * canvasWidth;
+  const panY = (0.5 - focusY) * canvasHeight;
+  canvas.style.transform = `translate3d(calc(-50% + ${panX}px), calc(-50% + ${panY}px), 0)`;
+}
+
+export function clampPdfFocus(focus, canvasSize, viewSize) {
+  if (canvasSize <= viewSize || canvasSize <= 0) return 0.5;
+  const halfView = Math.min(0.5, viewSize / (2 * canvasSize));
+  return Math.max(halfView, Math.min(1 - halfView, focus));
 }
 
 export async function movePdfPage(entry, index, delta) {
   if (!entry.pdf) return;
   const pages = entry.pdfOrder.filter((page) => !entry.pdfDeleted.has(page));
   entry.pdfCurrentPosition = Math.max(0, Math.min(pages.length - 1, (entry.pdfCurrentPosition || 0) + delta));
+  entry.pdfFocusX = 0.5;
+  entry.pdfFocusY = 0.5;
   await renderPdfPage(entry, document.querySelector("#preview-sheet-content"), index);
 }
 
@@ -293,13 +384,17 @@ async function renderDocx(entry, content) {
     try {
       await window.docx.renderAsync(await entry.file.arrayBuffer(), container, null, {
         className: "docx",
-        inWrapper: true,
+        inWrapper: false,
         ignoreWidth: false,
         ignoreHeight: false,
         breakPages: true,
         renderHeaders: true,
         renderFooters: true
       });
+      const pages = document.createElement("div");
+      pages.className = "docx-pages";
+      pages.append(...container.childNodes);
+      container.append(pages);
       fitPreviewContent(content);
       return;
     } catch (error) {
@@ -333,7 +428,7 @@ async function renderXlsx(entry, content) {
     const renderSheet = (index) => {
       contentHost.querySelector(".xlsx-table").innerHTML = window.XLSX.utils.sheet_to_html(workbook.Sheets[sheetNames[index]], { editable: false });
       contentHost.querySelectorAll("[data-xlsx-sheet]").forEach((tab, tabIndex) => tab.setAttribute("aria-pressed", String(tabIndex === index)));
-      fitPreviewContent(content);
+      fitPreviewContent(content, entry.previewZoom || 1);
     };
     contentHost.querySelectorAll("[data-xlsx-sheet]").forEach((tab) => tab.addEventListener("click", () => renderSheet(Number(tab.dataset.xlsxSheet))));
     contentHost.classList.remove("at-skeleton");

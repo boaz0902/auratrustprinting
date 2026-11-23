@@ -34,7 +34,7 @@
         <p id="order-service-error" class="form-message error" role="alert" hidden>Price information is not available yet. Please try again later.</p>
         <label id="drop-zone" class="drop-zone" for="file-input" tabindex="0" aria-label="Drop files or browse for files"><div class="drop-icon" aria-hidden="true">↑</div><strong>Drop files here</strong><span>or <u>Browse files</u></span></label>
         <button id="browse-files" class="button button-outline browse-files-button" type="button">Choose files</button>
-        <input id="file-input" class="file-input-native" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt">
+        <input id="file-input" class="file-input-native" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt">
         <div id="upload-error" class="form-message error" role="alert"></div><div id="file-list" class="file-list"></div>
         <div class="step-actions"><button id="upload-next" class="button button-gradient" type="button" disabled>Continue to preview →</button></div>
       </section>
@@ -44,8 +44,7 @@
           <span class="step-count" id="step-file-count">0 files</span>
         </div>
         <div id="preview-step2" class="preview-step2"></div>
-        <div class="step-actions split"><button class="at-btn at-btn-secondary" type="button" data-back="1">← Back</button><button id="options-next" class="at-btn at-btn-primary" type="button">Continue to payment →</button></div>
-        <div class="step2-sticky-summary" aria-label="Preview summary"><div class="step2-summary-meta"><span id="step2-file-count">0 files</span><strong id="mobile-live-total">₱0.00</strong></div><button id="options-next-mobile" class="at-btn at-btn-primary" type="button">Continue to payment <span aria-hidden="true">→</span></button></div>
+        <div class="step2-sticky-summary" aria-label="Preview summary"><button class="at-btn at-btn-secondary" type="button" data-back="1">← Back</button><div class="step2-summary-meta"><span id="step2-file-count">0 files</span><strong id="mobile-live-total">₱0.00</strong></div><button id="options-next" class="at-btn at-btn-primary" type="button">Continue to payment <span aria-hidden="true">→</span></button></div>
       </section>
       <section class="wizard-step" data-panel="3" hidden>
         <h2>Summary & GCash payment</h2>
@@ -71,7 +70,25 @@
     </div>
   </main>
   <div id="preview-fullscreen" class="fullscreen-modal" role="dialog" aria-modal="true" aria-label="Fullscreen document preview">
-    <div class="fullscreen-sheet" id="fullscreen-sheet"><button class="at-icon-btn fullscreen-close" type="button" data-preview-action="close-fullscreen" aria-label="Close fullscreen preview">×</button></div>
+    <div class="fullscreen-sheet" id="fullscreen-sheet">
+      <div class="fullscreen-toolbar" aria-label="Fullscreen preview controls">
+        <div class="preview-toolbar-group">
+          <button class="at-icon-btn" type="button" data-preview-action="zoom-out" aria-label="Zoom out">−</button>
+          <span id="fullscreen-zoom-label" class="zoom-label">100%</span>
+          <button class="at-icon-btn" type="button" data-preview-action="zoom-in" aria-label="Zoom in">+</button>
+          <button class="at-icon-btn" type="button" data-preview-action="fit" aria-label="Fit preview">Fit</button>
+        </div>
+        <div class="preview-toolbar-group pdf-only">
+          <button class="at-icon-btn" type="button" data-preview-action="previous" aria-label="Previous page">←</button>
+          <span id="fullscreen-page-label" class="page-label">Page 1</span>
+          <button class="at-icon-btn" type="button" data-preview-action="next" aria-label="Next page">→</button>
+        </div>
+        <button class="at-icon-btn fullscreen-close" type="button" data-preview-action="close-fullscreen" aria-label="Close fullscreen preview">×</button>
+      </div>
+      <div id="fullscreen-paper-stage" class="fullscreen-paper-stage">
+        <div id="fullscreen-paper" class="preview-sheet fullscreen-paper" data-paper="short"></div>
+      </div>
+    </div>
   </div>
 </body>
 </html>

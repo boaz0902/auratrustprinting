@@ -57,7 +57,7 @@ export function suggestService(file, kind, services) {
     return services.find((service) => service.id === "photo-prints");
   }
   if (kind === "docx") return services.find((service) => service.id === "docx-text-only");
-  if (["pdf", "doc", "xls", "xlsx", "ppt", "pptx", "txt"].includes(kind)) {
+  if (["pdf", "doc", "xls", "xlsx", "csv", "ppt", "pptx", "txt"].includes(kind)) {
     return services.find((service) => service.id === "xerox");
   }
   return undefined;

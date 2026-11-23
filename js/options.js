@@ -1,18 +1,8 @@
-import { extension, escapeHtml } from "./preview.js";
+import { extension, escapeHtml, normalizePaper, updatePaperPreview } from "./preview.js";
 import { getSmartDefaults } from "./smart-defaults.js";
 
-const PAPER = {
-  short: { label: "Short", dimensions: "8.5x11 in" },
-  a4: { label: "A4", dimensions: "8.27x11.69 in" },
-  long: { label: "Long", dimensions: "8.5x13 in" },
-  a3: { label: "A3", dimensions: "11.69x16.54 in" }
-};
 const currency = new Intl.NumberFormat("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-function normalizePaper(value) {
-  const normalized = String(value || "").toLowerCase();
-  return PAPER[normalized] ? normalized : "short";
-}
 function categoryKey(service) {
   const text = `${service?.category || ""} ${service?.name || ""}`.toLowerCase();
   if (text.includes("photo")) return "photo";
@@ -22,6 +12,14 @@ function categoryKey(service) {
 }
 function selectedService(entry, services) {
   return services.find((service) => String(service.id) === String(entry.options.service));
+}
+function paperFromVariant(variant) {
+  if (variant?.paper) return normalizePaper(variant.paper);
+  const label = String(variant?.label || "").toLowerCase();
+  for (const paper of ["legal", "letter", "a4", "a3", "long", "short"]) {
+    if (new RegExp(`\\b${paper}\\b`).test(label)) return normalizePaper(paper);
+  }
+  return "";
 }
 
 export async function initializeOptions(files, services, context) {
@@ -194,13 +192,15 @@ function handleControl(control, entry, index, files, services, context) {
     entry.options.pageRange = "";
     entry.suggestions.variantLabel = "";
     const variant = service?.variants?.find((item) => item.label === entry.options.variantLabel);
-    if (variant?.paper) entry.options.paper = normalizePaper(variant.paper);
+    const paper = paperFromVariant(variant);
+    if (paper) entry.options.paper = paper;
     if (variant?.color) entry.options.color = variant.color;
   } else if (key === "variantLabel") {
     entry.manual.variant = true;
     entry.options.variantLabel = control.value;
     const variant = selectedService(entry, services)?.variants?.find((item) => item.label === control.value);
-    if (variant?.paper) entry.options.paper = normalizePaper(variant.paper);
+    const paper = paperFromVariant(variant);
+    if (paper) entry.options.paper = paper;
     if (variant?.color) entry.options.color = variant.color;
   } else if (key === "copies") {
     entry.manual.copies = true;
@@ -364,8 +364,7 @@ export function updateLiveSummary(files, services) {
   });
 }
 function updateSheetPaper(paper) {
-  const sheet = document.querySelector("#preview-sheet");
-  if (sheet) sheet.dataset.paper = normalizePaper(paper);
+  updatePaperPreview(paper);
 }
 export function showToast(message) {
   let toast = document.querySelector(".at-toast");
