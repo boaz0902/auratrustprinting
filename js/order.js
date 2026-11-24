@@ -1,33 +1,17 @@
-import { gcashInfo, orderLimits } from "./config.js";
-import { createCustomerOrder, ensureAnonymousCustomer, requireSupabase, uploadOrderFile } from "./supabase.js";
-import { priceList } from "./sample-data.js";
-import { renderWorkspace, renderFileRail, renderActivePreview, renderPdfPage, movePdfPage, drawImagePreview, fitPreviewContent, updatePdfPan, clampPdfFocus, updatePaperPreview } from "./preview.js";
-import { initializeOptions, renderOptions, updateLiveSummary, calculateEstimate, getPageCount, getPageIndices, getLinePrice, validatePages, showToast } from "./options.js";
+import { fileTypeCategories, orderLimits } from "./config.js";
+import {
+  createQuoteOrder,
+  ensureAnonymousCustomer,
+  getPublicPriceData,
+  requireSupabase,
+  uploadOrderFile
+} from "./supabase.js";
 
 const currency = new Intl.NumberFormat("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const files = [];
+const submissionOrderId = crypto.randomUUID();
 let services = [];
-let servicesReady = false;
-
-const menuToggle = document.querySelector(".menu-toggle");
-const navLinks = document.querySelector("#primary-nav");
-menuToggle.addEventListener("click", () => {
-  const expanded = menuToggle.getAttribute("aria-expanded") === "true";
-  menuToggle.setAttribute("aria-expanded", String(!expanded));
-  menuToggle.setAttribute("aria-label", expanded ? "Open navigation" : "Close navigation");
-  navLinks.classList.toggle("is-open", !expanded);
-});
-navLinks.addEventListener("click", (event) => {
-  if (event.target.closest("a")) {
-    menuToggle.setAttribute("aria-expanded", "false");
-    menuToggle.setAttribute("aria-label", "Open navigation");
-    navLinks.classList.remove("is-open");
-  }
-});
-
-if (window.pdfjsLib) {
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-}
+let submitting = false;
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, (character) => ({
@@ -36,83 +20,76 @@ function escapeHtml(value = "") {
 }
 
 function extension(name) {
-  return name.split(".").pop().toLowerCase();
+  const dot = name.lastIndexOf(".");
+  return dot < 0 ? "" : name.slice(dot + 1).toLowerCase();
+}
+
+function categoryForFile(name) {
+  const ext = extension(name);
+  for (const [category, extensions] of Object.entries(fileTypeCategories)) {
+    if (extensions.includes(ext)) return category;
+  }
+  return "Design / other";
 }
 
 function formatSize(bytes) {
-  return bytes < 1024 * 1024 ? `${Math.max(1, Math.ceil(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function makeId() {
-  if (crypto.randomUUID) return crypto.randomUUID();
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (character) => {
-    const random = Math.random() * 16 | 0;
-    return (character === "x" ? random : (random & 3 | 8)).toString(16);
-  });
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function setStep(step) {
-  document.querySelectorAll("[data-panel]").forEach((panel) => { panel.hidden = Number(panel.dataset.panel) !== step; });
-  document.querySelectorAll(".wizard-progress li").forEach((item) => item.classList.toggle("active", Number(item.dataset.step) <= step));
+  document.querySelectorAll("[data-panel]").forEach((panel) => {
+    panel.hidden = Number(panel.dataset.panel) !== step;
+  });
+  document.querySelectorAll(".wizard-progress li").forEach((item) => {
+    const active = Number(item.dataset.step) === step;
+    item.classList.toggle("active", Number(item.dataset.step) <= step);
+    if (active) item.setAttribute("aria-current", "step");
+    else item.removeAttribute("aria-current");
+  });
   document.querySelector("#progress-bar").style.width = `${((step - 1) / 3) * 100}%`;
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-const dropZone = document.querySelector("#drop-zone");
-const fileInput = document.querySelector("#file-input");
-const fileList = document.querySelector("#file-list");
-const uploadError = document.querySelector("#upload-error");
-
-if (location.protocol === "file:") {
-  uploadError.textContent = "Local ES modules need an HTTP server. Run start-local.bat, then open http://127.0.0.1:8765/order.html.";
-  document.querySelector("#upload-next").disabled = true;
-  document.querySelector("#browse-files").disabled = true;
+function releaseFileResources(entry) {
+  if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl);
+  entry.previewUrl = null;
 }
 
-document.querySelector("#browse-files").addEventListener("click", () => fileInput.click());
-
 function validateFile(file) {
-  const fileExtension = extension(file.name);
-  const blockedExtensions = ["exe", "bat", "cmd", "com", "scr", "msi", "vbs", "ps1", "jar", "dll", "sh"];
-  if (blockedExtensions.includes(fileExtension)) return `“${file.name}” is an executable and cannot be uploaded.`;
-  if (!orderLimits.allowedExtensions.includes(fileExtension)) return `“${file.name}” is not a supported file type.`;
-  if (file.type && !orderLimits.allowedMimeTypes.includes(file.type) && file.type !== "application/octet-stream") {
-    return `“${file.name}” has an unsupported file type.`;
+  if (!file.size) return `"${file.name}" is empty. Choose a file with content.`;
+  if (file.size > orderLimits.maxFileSizeMB * 1024 * 1024) {
+    return `"${file.name}" is larger than ${orderLimits.maxFileSizeMB} MB. Choose a smaller file.`;
   }
-  if (!file.size) return `“${file.name}” is empty.`;
-  if (file.size > orderLimits.maxFileSizeMB * 1024 * 1024) return `“${file.name}” exceeds the ${orderLimits.maxFileSizeMB} MB limit.`;
   return "";
 }
 
 function renderFileList() {
-  fileList.innerHTML = files.map((entry, index) => `
-    <div class="upload-file">
-      <div class="file-icon" aria-hidden="true">${escapeHtml(extension(entry.file.name).toUpperCase())}</div>
-      <div class="file-meta"><strong>${escapeHtml(entry.file.name)}</strong><span>${formatSize(entry.file.size)} · ${entry.progress === 100 ? "Uploaded" : entry.progress ? "Uploading…" : "Ready for review"}</span>
-        <div class="upload-progress" role="progressbar" aria-label="Upload ${escapeHtml(entry.file.name)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${entry.progress}"><div style="width:${entry.progress}%"></div></div>
-      </div>
-      <button type="button" class="remove-file" data-remove="${index}" aria-label="Remove ${escapeHtml(entry.file.name)}">×</button>
-    </div>
-  `).join("");
-  document.querySelector("#upload-next").disabled = files.length === 0 || !servicesReady;
-}
-
-function releaseFilePreview(entry) {
-  if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl);
-  entry.previewUrl = null;
-  entry.pdf = null;
-  entry.image = null;
-  entry.options = null;
-  entry.manual = null;
-  entry.suggestions = null;
+  const list = document.querySelector("#file-list");
+  list.innerHTML = files.map((entry) => {
+    const ext = extension(entry.file.name) || "file";
+    return `<article class="upload-file" data-upload-file="${escapeHtml(entry.id)}">
+      <span class="file-icon" aria-hidden="true">${escapeHtml(ext.slice(0, 5).toUpperCase())}</span>
+      <div class="file-meta"><strong>${escapeHtml(entry.file.name)}</strong><span>${formatSize(entry.file.size)}</span></div>
+      <span class="extension-badge">.${escapeHtml(ext)}</span>
+      <button type="button" class="remove-file" data-remove-file="${escapeHtml(entry.id)}" aria-label="Remove ${escapeHtml(entry.file.name)}">×</button>
+    </article>`;
+  }).join("");
+  document.querySelector("#file-count").textContent = `${files.length} / ${orderLimits.maxFiles} file${files.length === 1 ? "" : "s"}`;
+  document.querySelector("#upload-next").disabled = files.length === 0;
+  document.querySelector("#upload-limits").textContent =
+    `Up to ${orderLimits.maxFiles} files, ${orderLimits.maxFileSizeMB} MB each and ${orderLimits.maxTotalSizeMB} MB total. We welcome any file type.`;
 }
 
 function addFiles(selectedFiles) {
-  uploadError.textContent = "";
+  const error = document.querySelector("#upload-error");
+  error.textContent = "";
   const messages = [];
+  let totalSize = files.reduce((total, entry) => total + entry.file.size, 0);
   for (const file of selectedFiles) {
     if (files.length >= orderLimits.maxFiles) {
-      messages.push(`You can upload up to ${orderLimits.maxFiles} print files.`);
+      messages.push(`You have reached the ${orderLimits.maxFiles}-file limit. Remove a file before adding another.`);
       break;
     }
     const problem = validateFile(file);
@@ -121,12 +98,28 @@ function addFiles(selectedFiles) {
       continue;
     }
     if (files.some((entry) => entry.file.name === file.name && entry.file.size === file.size)) continue;
-    files.push({ file, progress: 0, options: { service: "", variantLabel: "", addons: [], paper: "short", copies: 1, pageCount: "", pageRange: "", notes: "" } });
+    if (totalSize + file.size > orderLimits.maxTotalSizeMB * 1024 * 1024) {
+      messages.push(`These files exceed the ${orderLimits.maxTotalSizeMB} MB total limit. Remove a file or choose smaller files.`);
+      continue;
+    }
+    files.push({
+      id: crypto.randomUUID(),
+      file,
+      previewUrl: null,
+      pages: "",
+      notes: "",
+      selections: []
+    });
+    totalSize += file.size;
   }
-  if (messages.length) uploadError.textContent = messages.join(" ");
+  if (messages.length) error.textContent = messages.join(" ");
   renderFileList();
 }
 
+const dropZone = document.querySelector("#drop-zone");
+const fileInput = document.querySelector("#file-input");
+document.querySelector("#browse-files").addEventListener("click", () => fileInput.click());
+dropZone.addEventListener("click", () => fileInput.click());
 dropZone.addEventListener("keydown", (event) => {
   if (event.key === "Enter" || event.key === " ") {
     event.preventDefault();
@@ -146,721 +139,380 @@ fileInput.addEventListener("change", () => {
   addFiles(fileInput.files);
   fileInput.value = "";
 });
-fileList.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-remove]");
+document.querySelector("#file-list").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-remove-file]");
   if (!button) return;
-  const [removed] = files.splice(Number(button.dataset.remove), 1);
-  releaseFilePreview(removed);
+  event.preventDefault();
+  event.stopPropagation();
+  const index = files.findIndex((entry) => entry.id === button.dataset.removeFile);
+  if (index < 0) return;
+  releaseFileResources(files[index]);
+  files.splice(index, 1);
   renderFileList();
 });
 
-function sanitizePreview(markup) {
-  const parser = new DOMParser();
-  const parsed = parser.parseFromString(markup, "text/html");
-  const allowed = new Set(["P", "BR", "STRONG", "EM", "B", "I", "H1", "H2", "H3", "UL", "OL", "LI", "TABLE", "THEAD", "TBODY", "TR", "TH", "TD"]);
-  const copy = (node) => {
-    if (node.nodeType === Node.TEXT_NODE) return document.createTextNode(node.textContent || "");
-    if (node.nodeType !== Node.ELEMENT_NODE) return document.createDocumentFragment();
-    const fragment = document.createDocumentFragment();
-    for (const child of node.childNodes) fragment.append(copy(child));
-    if (!allowed.has(node.tagName)) return fragment;
-    const safeElement = document.createElement(node.tagName.toLowerCase());
-    safeElement.append(fragment);
-    return safeElement;
-  };
-  const wrapper = document.createElement("div");
-  parsed.body.childNodes.forEach((node) => wrapper.append(copy(node)));
-  return wrapper.innerHTML;
+function serviceMatchesFile(service, entry) {
+  const kinds = Array.isArray(service.file_kinds) ? service.file_kinds.map((kind) => String(kind).toLowerCase()) : [];
+  const ext = extension(entry.file.name);
+  if (kinds.includes(ext) || (categoryForFile(entry.file.name) === "Images" && kinds.includes("image"))) return true;
+  const text = `${service.category || ""} ${service.name || ""}`.toLowerCase();
+  if (categoryForFile(entry.file.name) === "Documents") {
+    if (/photo|image|sticker|label|keychain|mug|tarp|banner|pin|button|polaroid|instax/.test(text)) return false;
+    return /doc|document|print|binding|laminat|photocopy|xerox|scan|office/.test(text);
+  }
+  if (categoryForFile(entry.file.name) === "Images") {
+    return /image|photo|\bid\b|sticker|label|keychain|mug|tarp|banner|pin|button|polaroid|instax|card/.test(text);
+  }
+  return true;
 }
 
-function imageCanvas(entry, canvas) {
-  const image = entry.image;
-  const cropRatio = entry.imageCrop ? 0.8 : 1;
-  const sourceWidth = image.naturalWidth * cropRatio;
-  const sourceHeight = image.naturalHeight * cropRatio;
-  const rotated = (entry.imageRotation || 0) % 180 !== 0;
-  canvas.width = Math.round(rotated ? sourceHeight : sourceWidth);
-  canvas.height = Math.round(rotated ? sourceWidth : sourceHeight);
-  const context = canvas.getContext("2d");
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  context.save();
-  context.translate(canvas.width / 2, canvas.height / 2);
-  context.rotate((entry.imageRotation || 0) * Math.PI / 180);
-  context.filter = entry.imageBW ? "grayscale(1)" : "none";
-  context.drawImage(
-    image,
-    (image.naturalWidth - sourceWidth) / 2,
-    (image.naturalHeight - sourceHeight) / 2,
-    sourceWidth,
-    sourceHeight,
-    -sourceWidth / 2,
-    -sourceHeight / 2,
-    sourceWidth,
-    sourceHeight
-  );
-  context.restore();
+function serviceVariants(service) {
+  const variants = Array.isArray(service.variants) ? service.variants : [];
+  return variants.length ? variants : [{ label: service.unit || "Standard", price: service.price }];
 }
 
-async function renderPdf(entry, container, index) {
-  const pdf = entry.pdf || await window.pdfjsLib.getDocument({ data: await entry.file.arrayBuffer() }).promise;
-  entry.pdf = pdf;
-  entry.pdfOrder ||= Array.from({ length: pdf.numPages }, (_, page) => page);
-  entry.pdfDeleted ||= new Set();
-  entry.pdfRotations ||= new Map();
-  const availablePages = entry.pdfOrder.filter((page) => !entry.pdfDeleted.has(page));
-  if (!availablePages.length) throw new Error("Keep at least one PDF page.");
-  entry.pdfCurrentPosition = Math.min(entry.pdfCurrentPosition || 0, availablePages.length - 1);
-  const originalPageIndex = availablePages[entry.pdfCurrentPosition];
-  const page = await pdf.getPage(originalPageIndex + 1);
-  const rotation = (page.rotate + (entry.pdfRotations.get(originalPageIndex) || 0)) % 360;
-  const viewport = page.getViewport({ scale: 1.15, rotation });
-  const canvas = container.querySelector("canvas");
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
-  await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-  container.querySelector(`[data-pdf-page="${index}"]`).textContent = `Page ${entry.pdfCurrentPosition + 1} of ${availablePages.length}`;
-  container.querySelector(`[data-pdf-prev="${index}"]`).disabled = entry.pdfCurrentPosition === 0;
-  container.querySelector(`[data-pdf-next="${index}"]`).disabled = entry.pdfCurrentPosition >= availablePages.length - 1;
+function priceValue(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
-async function renderPreview(entry, index) {
-  const container = document.querySelector(`[data-preview="${index}"]`);
-  const file = entry.file;
-  if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl);
-  entry.previewUrl = URL.createObjectURL(file);
-  if (file.type.startsWith("image/")) {
-    container.innerHTML = `<div class="image-tools"><canvas data-image-canvas="${index}" aria-label="Edited image preview"></canvas><div><button type="button" data-image-rotate="${index}">Rotate</button><button type="button" data-image-bw="${index}">B&amp;W</button><button type="button" data-image-crop="${index}">Crop</button></div></div>`;
-    const image = new Image();
-    image.onload = () => {
-      entry.image = image;
-      imageCanvas(entry, container.querySelector("canvas"));
-    };
-    image.onerror = () => { container.textContent = "Image preview unavailable."; };
-    image.src = entry.previewUrl;
-    return;
-  }
-  if (extension(file.name) === "pdf") {
-    container.innerHTML = `<canvas class="pdf-canvas" aria-label="PDF page preview"></canvas><div class="preview-nav"><button type="button" data-pdf-prev="${index}" aria-label="Previous PDF page">←</button><span data-pdf-page="${index}">Loading PDF…</span><button type="button" data-pdf-next="${index}" aria-label="Next PDF page">→</button></div><div class="pdf-edit-tools"><button type="button" data-pdf-rotate="${index}">Rotate page</button><button type="button" data-pdf-delete="${index}">Delete page</button><button type="button" data-pdf-left="${index}">Move left</button><button type="button" data-pdf-right="${index}">Move right</button></div>`;
-    try {
-      await renderPdf(entry, container, index);
-    } catch (error) {
-      console.error("PDF preview failed.", error);
-      container.innerHTML = `<div class="unsupported-preview">PDF preview unavailable.</div>`;
-    }
-    return;
-  }
-  if (extension(file.name) === "docx") {
-    container.innerHTML = `<div class="unsupported-preview">Preview is handled by the new document viewer.</div>`;
-    return;
-  }
-  if (["xls", "xlsx"].includes(extension(file.name)) && window.XLSX) {
-    try {
-      const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array" });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      container.innerHTML = `<div class="xlsx-preview">${sanitizePreview(window.XLSX.utils.sheet_to_html(sheet))}</div>`;
-    } catch (error) {
-      console.error("Spreadsheet preview failed.", error);
-      container.innerHTML = `<div class="unsupported-preview">Spreadsheet preview unavailable.</div>`;
-    }
-    return;
-  }
-  container.innerHTML = `<div class="unsupported-preview"><strong aria-hidden="true">${escapeHtml(extension(file.name).toUpperCase())} file</strong><strong>${escapeHtml(file.name)}</strong><span>${formatSize(file.size)}</span></div>`;
+function findService(id) {
+  return services.find((service) => String(service.id) === String(id));
 }
 
-function serviceId(service, index) {
-  return service.id === undefined || service.id === null ? `sample-${index}` : String(service.id);
-}
-
-function selectedService(entry) {
-  return services.find((service, index) => serviceId(service, index) === entry.options.service);
-}
-
-const previewContext = { activeIndex: 0 };
-
-async function renderPreviews() {
-  const container = document.querySelector("#preview-step2");
-  renderWorkspace(container, files);
-  document.querySelector("#step-file-count").textContent = `${files.length} file${files.length === 1 ? "" : "s"}`;
-  const stickyCount = document.querySelector("#step2-file-count");
-  if (stickyCount) stickyCount.textContent = `${files.length} file${files.length === 1 ? "" : "s"}`;
-  files.forEach((entry) => { entry.isActive = false; });
-  files[0].isActive = true;
-  previewContext.activeIndex = 0;
-  await initializeOptions(files, services, previewContext);
-  await renderActivePreview(files[0], 0);
-  updateLiveSummary(files, services);
-}
-
-document.querySelector("#preview-step2").addEventListener("click", async (event) => {
-  const remove = event.target.closest("[data-preview-remove]");
-  if (remove) {
-    event.preventDefault();
-    event.stopPropagation();
-    const removedIndex = Number(remove.dataset.previewRemove);
-    if (!Number.isInteger(removedIndex) || !files[removedIndex]) return;
-    if (fullscreenIsOpen()) closeFullscreen();
-    const activeEntry = files[previewContext.activeIndex];
-    const [removed] = files.splice(removedIndex, 1);
-    releaseFilePreview(removed);
-
-    if (!files.length) {
-      previewContext.activeIndex = 0;
-      document.querySelector("#preview-options").replaceChildren();
-      document.querySelector("#preview-step2").replaceChildren();
-      document.querySelector("#step-file-count").textContent = "0 files";
-      updateLiveSummary(files, services);
-      setStep(1);
-      renderFileList();
-      return;
-    }
-
-    previewContext.activeIndex = activeEntry === removed
-      ? Math.min(removedIndex, files.length - 1)
-      : files.indexOf(activeEntry);
-    if (previewContext.activeIndex < 0) previewContext.activeIndex = 0;
-    files.forEach((entry) => { entry.isActive = false; });
-    const nextEntry = files[previewContext.activeIndex];
-    nextEntry.isActive = true;
-    renderFileList();
-    renderFileRail(files, previewContext.activeIndex);
-    renderOptions(nextEntry, previewContext.activeIndex, files, services, previewContext);
-    await renderActivePreview(nextEntry, previewContext.activeIndex);
-    document.querySelector("#step-file-count").textContent = `${files.length} file${files.length === 1 ? "" : "s"}`;
-    updateLiveSummary(files, services);
-    return;
-  }
-
-  const card = event.target.closest("[data-preview-file]");
-  if (card) {
-    const nextIndex = Number(card.dataset.previewFile);
-    files.forEach((entry) => { entry.isActive = false; });
-    files[nextIndex].isActive = true;
-    previewContext.activeIndex = nextIndex;
-    renderFileRail(files, nextIndex);
-    renderOptions(files[nextIndex], nextIndex, files, services, previewContext);
-    await renderActivePreview(files[nextIndex], nextIndex);
-  }
-
-  const action = event.target.closest("[data-preview-action]");
-  if (action) {
-    const entry = files[previewContext.activeIndex];
-    if (!entry) return;
-    if (!Number.isFinite(entry.previewZoom)) entry.previewZoom = 1;
-    if (entry.pdf && ["zoom-in", "zoom-out", "fit"].includes(action.dataset.previewAction)) {
-      if (action.dataset.previewAction === "fit") {
-        entry.previewZoom = 1;
-        entry.pdfFocusX = 0.5;
-        entry.pdfFocusY = 0.5;
-        await renderPdfViews(entry, previewContext.activeIndex);
-      } else {
-        const factor = action.dataset.previewAction === "zoom-in" ? 1.2 : 1 / 1.2;
-        await changePdfZoom(entry, previewContext.activeIndex, factor, document.querySelector("#preview-sheet-content"));
-      }
-    } else if (["zoom-in", "zoom-out", "fit"].includes(action.dataset.previewAction)) {
-      if (action.dataset.previewAction === "zoom-in") entry.previewZoom = Math.min(2.5, entry.previewZoom + 0.15);
-      if (action.dataset.previewAction === "zoom-out") entry.previewZoom = Math.max(0.6, entry.previewZoom - 0.15);
-      if (action.dataset.previewAction === "fit") entry.previewZoom = 1;
-      fitPreviewContent(document.querySelector("#preview-sheet-content"), entry.previewZoom);
-      if (fullscreenIsOpen()) fitPreviewContent(document.querySelector("#fullscreen-paper-content"), entry.previewZoom);
-      syncPreviewZoomLabel(entry);
-    }
-    if (action.dataset.previewAction === "previous") await changePdfPage(entry, previewContext.activeIndex, -1);
-    if (action.dataset.previewAction === "next") await changePdfPage(entry, previewContext.activeIndex, 1);
-    if (action.dataset.previewAction === "fullscreen") await openFullscreen(entry, previewContext.activeIndex);
-    if (action.dataset.previewAction === "close-fullscreen") closeFullscreen();
-  }
-
-  const thumb = event.target.closest("[data-pdf-position]");
-  if (thumb) {
-    const entry = files[previewContext.activeIndex];
-    entry.pdfCurrentPosition = Number(thumb.dataset.pdfPosition);
-    entry.pdfFocusX = 0.5;
-    entry.pdfFocusY = 0.5;
-    await renderPdfViews(entry, previewContext.activeIndex);
-  }
-
-  const imageAction = event.target.closest("[data-image-action]");
-  if (imageAction) {
-    const entry = files[previewContext.activeIndex];
-    if (imageAction.dataset.imageAction === "rotate") entry.imageRotation = ((entry.imageRotation || 0) + 90) % 360;
-    if (imageAction.dataset.imageAction === "crop") entry.imageCrop = !entry.imageCrop;
-    drawImagePreview(entry, document.querySelector("#preview-image-canvas"));
-  }
-});
-
-document.querySelector("#preview-step2").addEventListener("keydown", (event) => {
-  const card = event.target.closest("[data-preview-file]");
-  if (card && (event.key === "Enter" || event.key === " ")) {
-    event.preventDefault();
-    card.click();
-  }
-});
-
-document.querySelector("#preview-step2").addEventListener("change", (event) => {
-  if (event.target.id === "preview-bw-switch") {
-    document.querySelector("#preview-sheet-content")?.classList.toggle("is-bw", event.target.checked);
-  }
-});
-
-function fullscreenIsOpen() {
-  return document.querySelector("#preview-fullscreen")?.classList.contains("is-open") || false;
-}
-
-function syncPreviewZoomLabel(entry) {
-  const label = `${Math.round((entry.previewZoom || 1) * 100)}%`;
-  document.querySelectorAll(".zoom-label").forEach((node) => { node.textContent = label; });
-}
-
-async function renderPdfViews(entry, index) {
-  updatePaperPreview(entry.options?.paper);
-  await renderPdfPage(entry, document.querySelector("#preview-sheet-content"), index);
-  if (fullscreenIsOpen()) {
-    const stage = document.querySelector("#fullscreen-paper-stage");
-    const sheet = document.querySelector("#fullscreen-paper");
-    const content = document.querySelector("#fullscreen-paper-content");
-    updatePaperPreview(entry.options?.paper, sheet, stage);
-    await renderPdfPage(entry, content, index, sheet, stage);
-  }
-  syncPreviewZoomLabel(entry);
-}
-
-async function changePdfPage(entry, index, delta) {
-  await movePdfPage(entry, index, delta);
-  if (fullscreenIsOpen()) {
-    await renderPdfPage(
-      entry,
-      document.querySelector("#fullscreen-paper-content"),
-      index,
-      document.querySelector("#fullscreen-paper"),
-      document.querySelector("#fullscreen-paper-stage")
-    );
-  }
-}
-
-async function changePdfZoom(entry, index, factor, content, anchor = { x: 0.5, y: 0.5 }) {
-  const canvas = content?.querySelector(".pdf-preview-canvas");
-  const oldZoom = entry.previewZoom || 1;
-  const nextZoom = Math.max(0.4, Math.min(5, oldZoom * factor));
-  if (canvas && nextZoom !== oldZoom) {
-    const width = parseFloat(canvas.style.width) || canvas.clientWidth;
-    const height = parseFloat(canvas.style.height) || canvas.clientHeight;
-    const sourceX = (entry.pdfFocusX ?? 0.5) + (anchor.x - 0.5) * content.clientWidth / width;
-    const sourceY = (entry.pdfFocusY ?? 0.5) + (anchor.y - 0.5) * content.clientHeight / height;
-    const scale = nextZoom / oldZoom;
-    entry.pdfFocusX = clampPdfFocus(sourceX - (anchor.x - 0.5) * content.clientWidth / (width * scale), width * scale, content.clientWidth);
-    entry.pdfFocusY = clampPdfFocus(sourceY - (anchor.y - 0.5) * content.clientHeight / (height * scale), height * scale, content.clientHeight);
-  }
-  entry.previewZoom = nextZoom;
-  await renderPdfViews(entry, index);
-}
-
-async function openFullscreen(entry, index) {
-  const modal = document.querySelector("#preview-fullscreen");
-  const fullscreen = document.querySelector("#fullscreen-paper");
-  const stage = document.querySelector("#fullscreen-paper-stage");
-  const content = document.querySelector("#preview-sheet-content");
-  const clone = content.cloneNode(true);
-  clone.removeAttribute("id");
-  clone.id = "fullscreen-paper-content";
-  clone.classList.toggle("is-bw", document.querySelector("#preview-bw-switch")?.checked);
-  clone.classList.add("fullscreen-content");
-  fullscreen.replaceChildren(clone);
-  modal.classList.add("is-open");
-  document.body.style.overflow = "hidden";
-  modal.querySelectorAll(".pdf-only").forEach((control) => { control.hidden = !entry.pdf; });
-  updatePaperPreview(entry.options?.paper, fullscreen, stage);
-  if (entry.pdf) {
-    await renderPdfPage(entry, clone, index, fullscreen, stage);
-    syncPreviewZoomLabel(entry);
-  } else {
-    fitPreviewContent(clone, entry.previewZoom || 1);
-    syncPreviewZoomLabel(entry);
-  }
-  modal.querySelector("[data-preview-action='close-fullscreen']").focus();
-}
-
-function closeFullscreen() {
-  const modal = document.querySelector("#preview-fullscreen");
-  const entry = files[previewContext.activeIndex];
-  if (entry?.pdf) updatePdfPan(entry, document.querySelector("#preview-sheet-content"));
-  modal?.classList.remove("is-open");
-  document.querySelector("#fullscreen-paper")?.replaceChildren();
-  document.body.style.overflow = "";
-}
-
-document.querySelector("#preview-fullscreen").addEventListener("click", async (event) => {
-  if (event.target === event.currentTarget) {
-    closeFullscreen();
-    return;
-  }
-  const action = event.target.closest("[data-preview-action]");
-  if (!action) return;
-  if (action.dataset.previewAction === "close-fullscreen") {
-    closeFullscreen();
-    return;
-  }
-  const entry = files[previewContext.activeIndex];
-  if (!entry) return;
-  if (action.dataset.previewAction === "zoom-in" || action.dataset.previewAction === "zoom-out") {
-    if (entry.pdf) {
-      const factor = action.dataset.previewAction === "zoom-in" ? 1.2 : 1 / 1.2;
-      await changePdfZoom(entry, previewContext.activeIndex, factor, document.querySelector("#fullscreen-paper-content"));
-    } else {
-      const delta = action.dataset.previewAction === "zoom-in" ? 0.15 : -0.15;
-      entry.previewZoom = Math.max(0.6, Math.min(2.5, (entry.previewZoom || 1) + delta));
-      fitPreviewContent(document.querySelector("#preview-sheet-content"), entry.previewZoom);
-      fitPreviewContent(document.querySelector("#fullscreen-paper-content"), entry.previewZoom);
-      syncPreviewZoomLabel(entry);
-    }
-    return;
-  }
-  if (action.dataset.previewAction === "fit") {
-    entry.previewZoom = 1;
-    if (entry.pdf) {
-      entry.pdfFocusX = 0.5;
-      entry.pdfFocusY = 0.5;
-      await renderPdfViews(entry, previewContext.activeIndex);
-    } else {
-      fitPreviewContent(document.querySelector("#preview-sheet-content"), 1);
-      fitPreviewContent(document.querySelector("#fullscreen-paper-content"), 1);
-      syncPreviewZoomLabel(entry);
-    }
-    return;
-  }
-  if (!entry.pdf) return;
-  if (action.dataset.previewAction === "previous") await changePdfPage(entry, previewContext.activeIndex, -1);
-  if (action.dataset.previewAction === "next") await changePdfPage(entry, previewContext.activeIndex, 1);
-});
-
-document.querySelector("#preview-step2").addEventListener("change", async (event) => {
-  if (!["service", "variantLabel"].includes(event.target.dataset.option)) return;
-  const entry = files[previewContext.activeIndex];
-  if (!entry) return;
-  updatePaperPreview(entry.options?.paper);
-  if (fullscreenIsOpen()) updatePaperPreview(entry.options?.paper, document.querySelector("#fullscreen-paper"), document.querySelector("#fullscreen-paper-stage"));
-  if (entry.pdf) await renderPdfViews(entry, previewContext.activeIndex);
-  else {
-    fitPreviewContent(document.querySelector("#preview-sheet-content"), entry.previewZoom || 1);
-    if (fullscreenIsOpen()) fitPreviewContent(document.querySelector("#fullscreen-paper-content"), entry.previewZoom || 1);
-  }
-});
-
-let pdfDrag = null;
-document.addEventListener("pointerdown", (event) => {
-  const canvas = event.target.closest(".pdf-preview-canvas");
-  const entry = files[previewContext.activeIndex];
-  if (!canvas || !entry?.pdf || event.button !== 0) return;
-  const content = canvas.closest(".preview-sheet-content");
-  const width = parseFloat(canvas.style.width) || canvas.clientWidth;
-  const height = parseFloat(canvas.style.height) || canvas.clientHeight;
-  pdfDrag = {
-    canvas,
-    content,
-    entry,
-    pointerId: event.pointerId,
-    startX: event.clientX,
-    startY: event.clientY,
-    focusX: entry.pdfFocusX ?? 0.5,
-    focusY: entry.pdfFocusY ?? 0.5,
-    width,
-    height
-  };
-  canvas.setPointerCapture(event.pointerId);
-  content.classList.add("is-panning");
-  event.preventDefault();
-});
-
-document.addEventListener("pointermove", (event) => {
-  if (!pdfDrag || event.pointerId !== pdfDrag.pointerId) return;
-  const deltaX = event.clientX - pdfDrag.startX;
-  const deltaY = event.clientY - pdfDrag.startY;
-  pdfDrag.entry.pdfFocusX = clampPdfFocus(pdfDrag.focusX - deltaX / pdfDrag.width, pdfDrag.width, pdfDrag.content.clientWidth);
-  pdfDrag.entry.pdfFocusY = clampPdfFocus(pdfDrag.focusY - deltaY / pdfDrag.height, pdfDrag.height, pdfDrag.content.clientHeight);
-  updatePdfPan(pdfDrag.entry, document.querySelector("#preview-sheet-content"));
-  if (fullscreenIsOpen()) updatePdfPan(pdfDrag.entry, document.querySelector("#fullscreen-paper-content"));
-});
-
-function endPdfDrag(event) {
-  if (!pdfDrag || (event && event.pointerId !== pdfDrag.pointerId)) return;
-  pdfDrag.content.classList.remove("is-panning");
-  if (pdfDrag.canvas.hasPointerCapture(pdfDrag.pointerId)) pdfDrag.canvas.releasePointerCapture(pdfDrag.pointerId);
-  pdfDrag = null;
-}
-
-document.addEventListener("pointerup", endPdfDrag);
-document.addEventListener("pointercancel", endPdfDrag);
-
-document.addEventListener("wheel", (event) => {
-  if (!event.ctrlKey) return;
-  const canvas = event.target.closest(".pdf-preview-canvas");
-  const entry = files[previewContext.activeIndex];
-  if (!canvas || !entry?.pdf) return;
-  const content = canvas.closest(".preview-sheet-content");
-  const bounds = content.getBoundingClientRect();
-  const anchor = {
-    x: Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)),
-    y: Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height))
-  };
-  event.preventDefault();
-  const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
-  changePdfZoom(entry, previewContext.activeIndex, factor, content, anchor);
-}, { passive: false });
-
-let pdfResizeTimer;
-window.addEventListener("resize", () => {
-  const entry = files[previewContext.activeIndex];
-  if (!entry) return;
-  clearTimeout(pdfResizeTimer);
-  pdfResizeTimer = setTimeout(async () => {
-    updatePaperPreview(entry.options?.paper);
-    if (fullscreenIsOpen()) updatePaperPreview(entry.options?.paper, document.querySelector("#fullscreen-paper"), document.querySelector("#fullscreen-paper-stage"));
-    if (entry.pdf) await renderPdfViews(entry, previewContext.activeIndex);
-  }, 100);
-});
-
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeFullscreen();
-});
-
-async function processedFile(entry) {
-  if (entry.image && (entry.imageRotation || entry.imageCrop || entry.imageBW)) {
-    const canvas = document.createElement("canvas");
-    imageCanvas(entry, canvas);
-    const blob = await new Promise((resolve, reject) => canvas.toBlob((result) => result ? resolve(result) : reject(new Error("Image editing could not be saved.")), entry.file.type));
-    return new File([blob], entry.file.name, { type: entry.file.type, lastModified: Date.now() });
-  }
-  if (extension(entry.file.name) === "pdf" && entry.pdfOrder) {
-    const source = await window.PDFLib.PDFDocument.load(await entry.file.arrayBuffer());
-    const edited = await window.PDFLib.PDFDocument.create();
-    const pages = getPageIndices(entry);
-    if (!pages.length) throw new Error("A PDF must keep at least one page.");
-    const copied = await edited.copyPages(source, pages);
-    copied.forEach((page, position) => {
-      const rotation = entry.pdfRotations.get(pages[position]) || 0;
-      if (rotation) page.setRotation(window.PDFLib.degrees((page.getRotation().angle + rotation) % 360));
-      edited.addPage(page);
-    });
-    const bytes = await edited.save();
-    return new File([bytes], entry.file.name, { type: "application/pdf", lastModified: Date.now() });
-  }
-  return entry.file;
-}
-
-function pageCount(entry) {
-  return getPageCount(entry);
-}
-
-function priceFor(entry) {
-  const line = getLinePrice(entry, services);
+function selectionFromControls(card) {
+  const check = card.querySelector("[data-service-check]");
+  if (!check.checked) return null;
+  const service = findService(check.dataset.serviceCheck);
+  if (!service) return null;
+  const variantIndex = Number(card.querySelector("[data-variant]").value);
+  const variant = serviceVariants(service)[variantIndex];
+  if (!variant) return null;
+  const quantity = Math.min(500, Math.max(1, Number(card.querySelector("[data-quantity]").value) || 1));
+  const entry = files.find((item) => item.id === card.dataset.fileId);
+  const enteredPages = entry && entry.pages !== "" ? Number(entry.pages) : null;
+  const pages = Number.isInteger(enteredPages) && enteredPages >= 1 && enteredPages <= 10000 ? enteredPages : null;
+  const perPage = /page/i.test(service.unit || "");
+  const unitPrice = priceValue(variant.price);
+  const lineTotal = unitPrice === null || (perPage && !pages) ? null : unitPrice * quantity * (perPage ? pages : 1);
   return {
-    service: line.service || selectedService(entry),
-    variant: line.variant,
-    addons: line.addons,
-    unitPrice: line.price,
-    confirmed: line.confirmed
+    serviceId: service.id,
+    serviceName: service.name,
+    optionLabel: variant.label,
+    unit: service.unit || "unit",
+    quantity,
+    pages,
+    unitPrice,
+    lineTotal,
+    needsPageCount: perPage && !pages
   };
 }
 
-function calculateTotal() {
-  return calculateEstimate(files, services);
+function calculateEstimate(entry) {
+  const selections = entry.selections;
+  const incomplete = selections.some((selection) => selection.lineTotal === null);
+  const total = selections.reduce((sum, selection) => sum + (selection.lineTotal || 0), 0);
+  return { total, incomplete, hasSelections: selections.length > 0 };
 }
 
-function renderSummary() {
-  const total = calculateTotal();
-  const needsQuote = files.some((entry) => !getLinePrice(entry, services).confirmed);
-  const rows = files.map((entry) => {
-    const { service, variant, addons, unitPrice, confirmed } = priceFor(entry);
-    const copies = Math.max(1, Number(entry.options.copies || 1));
-    const quantity = service?.billing === "page" ? pageCount(entry) * copies : copies;
-    const optionLabel = [service?.name, variant?.label, ...(addons || []).map((addon) => addon.label)].filter(Boolean).join(" · ");
-    const unitLabel = service?.billing === "page" ? "page(s)" : String(service?.unit || "item(s)").replace(/^per\s+/i, "");
-    const label = `${optionLabel || "Service to be confirmed"} · ${quantity} ${unitLabel}`;
-    return `<div class="summary-row"><div><strong>${escapeHtml(entry.file.name)}</strong><span>${escapeHtml(label)}</span></div><strong>${confirmed ? `₱${currency.format(unitPrice * quantity)}` : "Price to be confirmed"}</strong></div>`;
+function formatAmount(value) {
+  return `₱${currency.format(value)}`;
+}
+
+function updateFileEstimate(fileId) {
+  const entry = files.find((item) => item.id === fileId);
+  const card = document.querySelector(`[data-file-card="${CSS.escape(fileId)}"]`);
+  if (!entry || !card) return;
+  entry.selections = [...card.querySelectorAll("[data-service-option]")].map(selectionFromControls).filter(Boolean);
+  const estimate = calculateEstimate(entry);
+  const total = card.querySelector("[data-file-estimate]");
+  const label = !estimate.hasSelections
+    ? "No services selected · you can leave a note"
+    : estimate.incomplete
+      ? estimate.total > 0 ? `${formatAmount(estimate.total)} known subtotal · Staff will quote remaining items` : "Staff will quote the selected options"
+      : formatAmount(estimate.total);
+  total.textContent = label;
+  card.querySelectorAll("[data-unit-price]").forEach((element) => {
+    const service = findService(element.dataset.serviceId);
+    const optionIndex = Number(element.closest("[data-service-option]").querySelector("[data-variant]").value);
+    const price = service && priceValue(serviceVariants(service)[optionIndex]?.price);
+    element.textContent = price === null ? "Staff will quote" : `${formatAmount(price)} ${service.unit ? `/ ${service.unit.replace(/^per\s+/i, "")}` : ""}`;
+  });
+}
+
+function renderServiceGuide() {
+  const list = document.querySelector("#service-guide-list");
+  const empty = document.querySelector("#service-guide-empty");
+  if (!services.length) {
+    list.innerHTML = "";
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+  list.innerHTML = files.map((entry) => {
+    const category = categoryForFile(entry.file.name);
+    const applicable = services.filter((service) => serviceMatchesFile(service, entry));
+    const perFile = applicable.map((service) => {
+      const variants = serviceVariants(service);
+      const selected = entry.selections.find((item) => String(item.serviceId) === String(service.id));
+      const selectedIndex = selected ? variants.findIndex((item) => item.label === selected.optionLabel) : 0;
+      const variantOptions = variants.map((variant, index) => {
+        const price = priceValue(variant.price);
+        const amount = price === null ? "Staff will quote" : `${formatAmount(price)}${service.unit ? ` / ${service.unit.replace(/^per\s+/i, "")}` : ""}`;
+        return `<option value="${index}" ${index === Math.max(0, selectedIndex) ? "selected" : ""}>${escapeHtml(variant.label)} · ${escapeHtml(amount)}</option>`;
+      }).join("");
+      const price = priceValue(variants[Math.max(0, selectedIndex)]?.price);
+      const unitPrice = price === null ? "Staff will quote" : `${formatAmount(price)}${service.unit ? ` / ${service.unit.replace(/^per\s+/i, "")}` : ""}`;
+      return `<div class="service-option" data-service-option data-file-id="${escapeHtml(entry.id)}">
+        <label class="service-option-name"><input type="checkbox" data-service-check="${escapeHtml(service.id)}" ${selected ? "checked" : ""}><span><strong>${escapeHtml(service.name)}</strong><small>${escapeHtml(service.description || service.category || "Available service")}</small></span></label>
+        <div class="service-option-controls">
+          <label><span>Option / finish</span><select data-variant aria-label="${escapeHtml(service.name)} option">${variantOptions}</select></label>
+          <label><span>Quantity</span><input data-quantity type="number" min="1" max="500" value="${selected?.quantity || 1}" inputmode="numeric" aria-label="${escapeHtml(service.name)} quantity"></label>
+          <span class="unit-price" data-unit-price data-service-id="${escapeHtml(service.id)}">${unitPrice}</span>
+        </div>
+      </div>`;
+    }).join("");
+    const estimate = calculateEstimate(entry);
+    const initialTotal = !entry.selections.length
+      ? "No services selected · you can leave a note"
+      : estimate.incomplete
+        ? estimate.total > 0 ? `${formatAmount(estimate.total)} known subtotal · Staff will quote remaining items` : "Staff will quote the selected options"
+        : formatAmount(estimate.total);
+    return `<article class="service-file-card" data-file-card="${escapeHtml(entry.id)}">
+      <div class="service-file-heading"><span class="file-icon" aria-hidden="true">${escapeHtml((extension(entry.file.name) || "FILE").slice(0, 5).toUpperCase())}</span><div><h3>${escapeHtml(entry.file.name)}</h3><span>${escapeHtml(category)} price guide</span></div></div>
+      <p class="service-category-note">${category === "Design / other" ? "Custom job — our staff will review your file and quote you." : category === "Documents" ? "Document printing, photocopying, scanning and finishing options." : "Photo printing and related personalized services."}</p>
+      <label class="order-field page-count-field"><span>Number of pages <small>(optional, if known)</small></span><input data-page-count="${escapeHtml(entry.id)}" type="number" min="1" max="10000" value="${escapeHtml(entry.pages)}" inputmode="numeric" placeholder="Leave blank if unsure"></label>
+      <div class="service-options">${perFile || '<p class="step-copy">No matching price-list items are available. Staff will review your file and quote you.</p>'}</div>
+      <label class="order-field"><span>Notes for this file <small>(optional)</small></span><textarea data-file-notes="${escapeHtml(entry.id)}" rows="2" maxlength="500" placeholder="Print preferences or instructions">${escapeHtml(entry.notes)}</textarea></label>
+      <div class="file-estimate"><span>Estimated total <small>Estimated. Final price confirmed by our staff.</small></span><strong data-file-estimate>${escapeHtml(initialTotal)}</strong></div>
+    </article>`;
   }).join("");
-  document.querySelector("#order-summary").innerHTML = `<h3>Estimated breakdown</h3>${rows}<div class="summary-total"><span>${needsQuote ? "Priced items subtotal" : "Estimated total"}</span><strong>₱${currency.format(total)}${needsQuote ? " + quote" : ""}</strong></div><p class="summary-note">${needsQuote ? "Some selected options have no posted price. Confirm the final amount with AuraTrust before paying." : "This estimate uses the selected service, options, and quantity."}</p>`;
-  document.querySelector("#gcash-exact").textContent = needsQuote
-    ? "Confirm the final amount with AuraTrust before paying"
-    : `Exact amount: ₱${currency.format(total)}`;
-  return total;
+  list.querySelectorAll("[data-file-card]").forEach((card) => updateFileEstimate(card.dataset.fileCard));
+}
+
+document.querySelector("#service-guide-list").addEventListener("change", (event) => {
+  const card = event.target.closest("[data-file-card]");
+  if (!card) return;
+  if (event.target.matches("[data-page-count]")) {
+    const entry = files.find((item) => item.id === event.target.dataset.pageCount);
+    if (entry) entry.pages = event.target.value;
+  }
+  updateFileEstimate(card.dataset.fileCard);
+});
+document.querySelector("#service-guide-list").addEventListener("input", (event) => {
+  const card = event.target.closest("[data-file-card]");
+  if (!card) return;
+  if (event.target.matches("[data-file-notes]")) {
+    const entry = files.find((item) => item.id === event.target.dataset.fileNotes);
+    if (entry) entry.notes = event.target.value;
+  }
+  if (event.target.matches("[data-page-count]")) {
+    const entry = files.find((item) => item.id === event.target.dataset.pageCount);
+    if (entry) entry.pages = event.target.value;
+  }
+  if (event.target.matches("[data-page-count],[data-quantity]")) updateFileEstimate(card.dataset.fileCard);
+});
+
+function allSelections() {
+  return files.flatMap((entry) => entry.selections.map((selection) => ({ entry, selection })));
+}
+
+function calculateOrderEstimate() {
+  const selections = allSelections();
+  const incomplete = selections.some(({ selection }) => selection.lineTotal === null);
+  const total = selections.reduce((sum, { selection }) => sum + (selection.lineTotal || 0), 0);
+  return { total, incomplete, hasSelections: selections.length > 0 };
+}
+
+function renderReview(form) {
+  const data = new FormData(form);
+  const estimate = calculateOrderEstimate();
+  const fileHtml = files.map((entry) => {
+    const options = entry.selections.length
+      ? entry.selections.map((selection) => `<li>${escapeHtml(selection.serviceName)} · ${escapeHtml(selection.optionLabel)} · ${selection.quantity} ${escapeHtml(selection.unit)}${selection.pages ? ` · ${selection.pages} pages` : ""} · ${selection.lineTotal === null ? "Staff will quote" : formatAmount(selection.lineTotal)}</li>`).join("")
+      : "<li>No service selected — staff quote requested</li>";
+    return `<article class="review-file"><strong>${escapeHtml(entry.file.name)}</strong><ul>${options}</ul>${entry.notes ? `<p>File note: ${escapeHtml(entry.notes)}</p>` : ""}</article>`;
+  }).join("");
+  const totalText = !estimate.hasSelections
+    ? "Staff quote requested"
+    : estimate.incomplete
+      ? estimate.total > 0 ? `${formatAmount(estimate.total)} known subtotal · Staff will quote remaining items` : "Staff will quote the selected options"
+      : formatAmount(estimate.total);
+  const customerDetails = [
+    data.get("customerName"),
+    data.get("mobile"),
+    data.get("contactMethod"),
+    data.get("contactHandle"),
+    data.get("pickupOrDelivery"),
+    data.get("preferredPickupDate") ? `Preferred date: ${data.get("preferredPickupDate")}` : ""
+  ].filter(Boolean).join(" · ");
+  document.querySelector("#review-summary").innerHTML = `
+    <div class="review-summary-section"><h4>Files and services</h4>${fileHtml}</div>
+    ${data.get("customerNotes") ? `<div class="review-summary-section"><h4>Special instructions</h4><p>${escapeHtml(data.get("customerNotes"))}</p></div>` : ""}
+    <div class="review-summary-total"><span>Estimated total</span><strong>${escapeHtml(totalText)}</strong></div>
+    <p class="review-customer">${escapeHtml(customerDetails)}</p>`;
+}
+
+const detailsForm = document.querySelector("#customer-details-form");
+["input", "change"].forEach((eventName) => detailsForm.addEventListener(eventName, () => renderReview(detailsForm)));
+
+function normalizePhilippineMobile(value) {
+  let digits = value.replace(/\D/g, "");
+  if (digits.startsWith("63")) digits = `0${digits.slice(2)}`;
+  else if (digits.length === 10 && digits.startsWith("9")) digits = `0${digits}`;
+  return digits;
+}
+
+function validPhilippineMobile(value) {
+  return /^09\d{9}$/.test(normalizePhilippineMobile(value));
 }
 
 document.querySelector("#upload-next").addEventListener("click", () => {
-  uploadError.textContent = "";
-  renderPreviews();
+  renderServiceGuide();
+  setStep(2);
+});
+document.querySelector("#services-back").addEventListener("click", () => setStep(1));
+document.querySelector("#services-next").addEventListener("click", () => {
+  renderReview(detailsForm);
+  setStep(3);
+});
+document.querySelector("#details-back").addEventListener("click", () => {
+  renderServiceGuide();
   setStep(2);
 });
 
-function continueFromOptions() {
-  for (const entry of files) {
-    const line = getLinePrice(entry, services);
-    if (!line.service || line.reason === "Choose an option to see its price.") {
-      showToast(line.reason || "Choose a service for " + entry.file.name + ".");
-      return;
-    }
-    if (line.service.billing === "page" && extension(entry.file.name) !== "pdf" && !Number(entry.options.pageCount)) {
-      showToast("Enter number of pages for " + entry.file.name + ".");
-      return;
-    }
-    if (!validatePages(entry)) {
-      showToast(entry.pageRangeError || "Check the page range.");
-      return;
-    }
+function userFacingUploadError(error) {
+  const message = String(error?.message || "");
+  if (/quota|storage.*limit|exceed.*limit|payload too large|entity too large|maximum allowed size/i.test(message)) {
+    return "AuraTrust’s available file storage limit was reached. Please try again later or contact us to send your files another way.";
   }
-  try {
-    renderSummary();
-    setStep(3);
-  } catch (error) {
-    uploadError.textContent = error.message;
-  }
+  if (/bucket.*not found/i.test(message)) return "File storage is not ready yet. Please contact AuraTrust and try again later.";
+  return "We couldn’t upload your files. Check your connection and try again; your request has not been submitted.";
 }
 
-document.querySelector("#options-next").addEventListener("click", continueFromOptions);
-document.querySelectorAll("[data-back]").forEach((button) => button.addEventListener("click", () => setStep(Number(button.dataset.back))));
-
-document.querySelector("#gcash-name").textContent = gcashInfo.name;
-document.querySelector("#gcash-number").textContent = gcashInfo.number;
-document.querySelector("#download-qr").href = gcashInfo.qrPath;
-document.querySelector("#gcash-qr").src = gcashInfo.qrPath;
-document.querySelector("#terms-checkbox").addEventListener("change", (event) => {
-  document.querySelector("#place-order").disabled = !event.target.checked;
-});
-
-function validateReceipt(receipt) {
-  if (!receipt) throw new Error("Please upload your GCash receipt screenshot.");
-  if (!["jpg", "jpeg", "png", "webp"].includes(extension(receipt.name))) throw new Error("The receipt must be a JPG, PNG, or WebP image.");
-  if (receipt.size > orderLimits.maxFileSizeMB * 1024 * 1024) throw new Error(`The receipt exceeds the ${orderLimits.maxFileSizeMB} MB limit.`);
-  if (!receipt.type.startsWith("image/")) throw new Error("The receipt file must be an image.");
+function buildOrderItems(uploadedFiles) {
+  return files.map((entry, index) => ({
+    fileName: entry.file.name,
+    fileType: entry.file.type || "application/octet-stream",
+    extension: extension(entry.file.name),
+    size: entry.file.size,
+    storagePath: uploadedFiles[index].path,
+    pages: Number.isInteger(Number(entry.pages)) && Number(entry.pages) >= 1 && Number(entry.pages) <= 10000
+      ? Number(entry.pages)
+      : null,
+    notes: entry.notes,
+    selections: entry.selections.map((selection) => ({
+      serviceId: selection.serviceId,
+      serviceName: selection.serviceName,
+      optionLabel: selection.optionLabel,
+      unit: selection.unit,
+      quantity: selection.quantity,
+      pages: selection.pages,
+      unitPrice: selection.unitPrice,
+      estimatedTotal: selection.lineTotal
+    }))
+  }));
 }
 
-function uniqueStorageName(fileName, index, seen) {
-  const clean = fileName.normalize("NFKC").replace(/[^a-zA-Z0-9._-]/g, "_");
-  let name = clean;
-  let suffix = 2;
-  while (seen.has(name.toLowerCase())) {
-    const dot = clean.lastIndexOf(".");
-    name = dot > 0 ? `${clean.slice(0, dot)}-${suffix}${clean.slice(dot)}` : `${clean}-${suffix}`;
-    suffix++;
-  }
-  seen.add(name.toLowerCase());
-  return name || `file-${index + 1}`;
-}
-
-async function createOrder(form) {
-  const client = requireSupabase();
-  const user = await ensureAnonymousCustomer();
-  const orderId = makeId();
-  const orderNumber = `AT-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${makeId().slice(0, 6).toUpperCase()}`;
-  const receipt = form.receipt.files[0];
-  validateReceipt(receipt);
-
-  const uploadedPaths = [];
-  const seenNames = new Set();
-  const progress = document.querySelector("#submission-progress");
-  progress.innerHTML = files.map((entry, index) => `<div class="upload-file"><span class="file-icon">${escapeHtml(extension(entry.file.name).toUpperCase())}</span><div class="file-meta"><strong>${escapeHtml(entry.file.name)}</strong><span data-upload-status="${index}">Preparing file…</span><div class="upload-progress" role="progressbar" aria-label="Upload ${escapeHtml(entry.file.name)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div data-submit-progress="${index}" style="width:0%"></div></div></div></div>`).join("");
-  progress.hidden = false;
-
-  try {
-    const items = [];
-    for (const [index, entry] of files.entries()) {
-      document.querySelector(`[data-upload-status="${index}"]`).textContent = "Preparing…";
-      const file = await processedFile(entry);
-      const storageName = uniqueStorageName(file.name, index, seenNames);
-      const progressBar = document.querySelector(`[data-submit-progress="${index}"]`);
-      progressBar.parentElement.classList.add("is-indeterminate");
-      progressBar.parentElement.removeAttribute("aria-valuenow");
-      progressBar.parentElement.setAttribute("aria-valuetext", "Uploading");
-      document.querySelector(`[data-upload-status="${index}"]`).textContent = "Uploading securely…";
-      const uploaded = await uploadOrderFile(user.id, orderId, file, storageName);
-      uploadedPaths.push(uploaded.path);
-      entry.progress = 100;
-      progressBar.parentElement.classList.remove("is-indeterminate");
-      progressBar.style.width = "100%";
-      progressBar.parentElement.setAttribute("aria-valuenow", "100");
-      progressBar.parentElement.removeAttribute("aria-valuetext");
-      document.querySelector(`[data-upload-status="${index}"]`).textContent = "Uploaded";
-      const { service, variant } = priceFor(entry);
-      items.push({
-        fileName: entry.file.name,
-        storagePath: uploaded.path,
-        fileType: file.type || "application/octet-stream",
-        size: file.size,
-        options: { ...entry.options, service: service?.name || "To be confirmed", serviceId: service?.id || null, variant: variant || null }
-      });
-    }
-
-    const receiptName = uniqueStorageName(`receipt-${receipt.name}`, files.length, seenNames);
-    const uploadedReceipt = await uploadOrderFile(user.id, orderId, receipt, receiptName);
-    uploadedPaths.push(uploadedReceipt.path);
-    const estimatedTotal = calculateTotal();
-    const order = await createCustomerOrder({
-      id: orderId,
-      order_number: orderNumber,
-      customer_id: user.id,
-      customer_name: form.customerName.value.trim(),
-      mobile: form.mobile.value.trim(),
-      pickup_or_delivery: form.pickupOrDelivery.value,
-      items,
-      estimated_total: estimatedTotal,
-      gcash_ref: form.gcashRef.value.trim(),
-      receipt_path: uploadedReceipt.path,
-      status: "Received",
-      terms_accepted_at: new Date().toISOString()
-    });
-    return order;
-  } catch (error) {
-    if (uploadedPaths.length) {
-      const { error: cleanupError } = await client.storage.from("order-files").remove(uploadedPaths);
-      if (cleanupError) console.error("Failed to clean up incomplete order uploads.", cleanupError);
-    }
-    progress.hidden = true;
-    files.forEach((entry) => { entry.progress = 0; });
-    renderFileList();
-    throw error;
-  }
-}
-
-document.querySelector("#payment-form").addEventListener("submit", async (event) => {
+document.querySelector("#customer-details-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const form = event.currentTarget.elements;
-  const error = document.querySelector("#payment-error");
-  const button = document.querySelector("#place-order");
-  if (!document.querySelector("#terms-checkbox").checked) return;
+  if (submitting) return;
+  const form = event.currentTarget;
+  const values = new FormData(form);
+  const customerName = form.elements.customerName;
+  customerName.setCustomValidity(customerName.value.trim().length >= 2 ? "" : "Enter your name using at least 2 characters.");
+  const mobile = form.elements.mobile;
+  mobile.setCustomValidity(validPhilippineMobile(mobile.value) ? "" : "Enter a valid Philippine mobile number, such as 09XXXXXXXXX or +639XXXXXXXXX.");
+  if (!form.reportValidity()) return;
+  if (values.get("website")) {
+    document.querySelector("#details-error").textContent = "We couldn’t submit this request. Please review the form and try again.";
+    return;
+  }
+  if (!files.length) {
+    setStep(1);
+    document.querySelector("#upload-error").textContent = "Add at least one file before sending your request.";
+    return;
+  }
+  const button = document.querySelector("#submit-order");
+  const error = document.querySelector("#details-error");
+  submitting = true;
   button.disabled = true;
+  button.textContent = "Sending your request…";
   error.textContent = "";
+  let uploaded = [];
+  let orderWriteStarted = false;
   try {
-    const order = await createOrder(form);
+    const user = await ensureAnonymousCustomer();
+    const orderId = submissionOrderId;
+    for (const entry of files) {
+      uploaded.push(await uploadOrderFile(user.id, orderId, entry.file, `${entry.id}-${entry.file.name}`));
+    }
+    const estimate = calculateOrderEstimate();
+    orderWriteStarted = true;
+    const order = await createQuoteOrder({
+      id: orderId,
+      customerId: user.id,
+      customerName: String(values.get("customerName")).trim(),
+      mobile: normalizePhilippineMobile(String(values.get("mobile"))),
+      contactMethod: String(values.get("contactMethod")),
+      contactHandle: String(values.get("contactHandle") || "").trim() || null,
+      pickupOrDelivery: String(values.get("pickupOrDelivery")),
+      preferredPickupDate: String(values.get("preferredPickupDate") || "") || null,
+      customerNotes: String(values.get("customerNotes") || "").trim() || null,
+      estimatedTotal: estimate.hasSelections && !estimate.incomplete ? estimate.total : null,
+      termsAcceptedAt: new Date().toISOString(),
+      items: buildOrderItems(uploaded)
+    });
     document.querySelector("#confirmed-number").textContent = order.order_number;
     document.querySelector("#track-order-link").href = `track.html?order=${encodeURIComponent(order.order_number)}`;
     setStep(4);
   } catch (problem) {
-    console.error("Order submission failed.", problem);
-    error.textContent = problem.message === "Anonymous sign-ins are disabled"
-      ? "Online ordering is not enabled yet. AuraTrust needs to enable anonymous sign-ins in Supabase Auth."
-      : problem.message || "We could not place the order. Please try again.";
+    console.error("Unable to submit quote request.", problem);
+    if (uploaded.length && !orderWriteStarted) {
+      try {
+        await requireSupabase().storage.from("order-files").remove(uploaded.map((file) => file.path));
+      } catch (cleanupError) {
+        console.error("Unable to clean up files from the failed quote request.", cleanupError);
+      }
+    }
+    error.textContent = orderWriteStarted
+      ? "We couldn’t confirm the request was saved. You can retry safely; this form reuses the same request reference."
+      : userFacingUploadError(problem);
   } finally {
-    button.disabled = !document.querySelector("#terms-checkbox").checked;
+    submitting = false;
+    button.disabled = false;
+    button.innerHTML = 'Send quote request <span aria-hidden="true">→</span>';
   }
 });
 
-document.querySelector("#payment-form").elements.receipt.addEventListener("change", (event) => {
-  try {
-    validateReceipt(event.target.files[0]);
-    document.querySelector("#payment-error").textContent = "";
-  } catch (error) {
-    document.querySelector("#payment-error").textContent = error.message;
-  }
+const menuToggle = document.querySelector(".menu-toggle");
+const navLinks = document.querySelector("#primary-nav");
+menuToggle?.addEventListener("click", () => {
+  const expanded = menuToggle.getAttribute("aria-expanded") === "true";
+  menuToggle.setAttribute("aria-expanded", String(!expanded));
+  navLinks?.classList.toggle("is-open", !expanded);
+});
+navLinks?.addEventListener("click", (event) => {
+  if (!event.target.closest("a")) return;
+  menuToggle?.setAttribute("aria-expanded", "false");
+  navLinks.classList.remove("is-open");
 });
 
-async function loadServices() {
-  services = priceList.filter((service) => service.visible);
-  if (!services.length) {
-    document.querySelector("#order-service-error").hidden = false;
-  }
-  servicesReady = services.length > 0;
-  renderFileList();
-}
-
-document.querySelector("#order-service-error").hidden = true;
-document.querySelector("#upload-next").disabled = true;
-loadServices();
+const pickupDateMin = new Date();
+pickupDateMin.setMinutes(pickupDateMin.getMinutes() - pickupDateMin.getTimezoneOffset());
+detailsForm.elements.preferredPickupDate.min = pickupDateMin.toISOString().slice(0, 10);
+document.querySelector("#upload-limits").textContent =
+  `Up to ${orderLimits.maxFiles} files, ${orderLimits.maxFileSizeMB} MB each and ${orderLimits.maxTotalSizeMB} MB total. We welcome any file type.`;
+getPublicPriceData().then(({ services: availableServices }) => {
+  services = availableServices;
+  if (!services.length) document.querySelector("#service-guide-error").textContent =
+    "No published services are available right now. You can still submit a custom job for a staff quote.";
+  if (!document.querySelector('[data-panel="2"]').hidden) renderServiceGuide();
+}).catch((error) => {
+  console.error("Unable to load current service prices.", error);
+  document.querySelector("#service-guide-error").textContent =
+    "The price list is temporarily unavailable. You can still submit a custom job for a staff quote.";
+  if (!document.querySelector('[data-panel="2"]').hidden) renderServiceGuide();
+});
 renderFileList();

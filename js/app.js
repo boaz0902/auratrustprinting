@@ -1,5 +1,5 @@
 import { businessInfo } from "./config.js";
-import { priceList } from "./sample-data.js";
+import { getPublicPriceData } from "./supabase.js";
 
 const categoryTabs = document.querySelector("#category-tabs");
 const categoryContainer = document.querySelector("#price-categories");
@@ -8,7 +8,7 @@ const statusMessage = document.querySelector("#prices-status");
 const lastUpdated = document.querySelector("#last-updated");
 const currency = new Intl.NumberFormat("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 let selectedCategory = "All";
-let services = priceList.filter((service) => service.visible);
+let services = [];
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, (character) => ({
@@ -83,11 +83,28 @@ function renderPrices() {
   }).join("");
 }
 
-function loadPrices() {
-  statusMessage.textContent = "Options without a posted rate are marked “Price to be confirmed.”";
-  lastUpdated.innerHTML = "Prices supplied by <span>AuraTrust</span>";
-  renderTabs();
-  renderPrices();
+async function loadPrices() {
+  statusMessage.textContent = "Loading the current price list…";
+  try {
+    const data = await getPublicPriceData();
+    services = data.services;
+    statusMessage.textContent = services.length
+      ? "Options without a posted rate are marked “Price to be confirmed.”"
+      : "No published services are available yet. Please contact AuraTrust for a quote.";
+    if (data.lastUpdated) {
+      lastUpdated.textContent = `Prices last updated ${new Intl.DateTimeFormat("en-PH", { dateStyle: "medium" }).format(new Date(data.lastUpdated))}`;
+    } else {
+      lastUpdated.innerHTML = "Prices supplied by <span>AuraTrust</span>";
+    }
+    renderTabs();
+    renderPrices();
+  } catch (error) {
+    console.error("Unable to load public price list.", error);
+    statusMessage.textContent = "The price list is temporarily unavailable. Please try again later or contact AuraTrust.";
+    statusMessage.classList.add("error");
+    categoryTabs.innerHTML = "";
+    categoryContainer.innerHTML = `<div class="empty-state"><strong>Price list unavailable</strong><p>Please try again later or contact AuraTrust for a quote.</p></div>`;
+  }
 }
 
 function renderContact() {

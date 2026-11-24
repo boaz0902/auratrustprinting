@@ -11,28 +11,14 @@ export const businessInfo = {
   hours: "Monday–Saturday, 8:00 AM–6:00 PM"
 };
 
-export const gcashInfo = {
-  name: "AuraTrust Printing",
-  number: "0900 000 0000",
-  qrPath: "assets/gcash-qr.png"
+export const orderLimits = {
+  maxFileSizeMB: 10,
+  maxFiles: 10,
+  maxTotalSizeMB: 40
 };
 
-export const orderLimits = {
-  maxFileSizeMB: 25,
-  maxFiles: 10,
-  allowedExtensions: ["pdf", "doc", "docx", "xls", "xlsx", "csv", "ppt", "pptx", "jpg", "jpeg", "png", "webp", "txt"],
-  allowedMimeTypes: [
-    "application/pdf",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "text/csv",
-    "application/vnd.ms-powerpoint",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-    "text/plain"
-  ]
+export const fileTypeCategories = {
+  Documents: ["docx", "doc", "pdf", "pptx", "ppt", "xlsx", "xls", "csv", "txt", "odt", "rtf"],
+  Images: ["png", "jpg", "jpeg", "webp", "gif", "heic", "bmp", "svg", "tiff"],
+  "Design / other": ["psd", "ai", "cdr", "eps", "zip"]
 };

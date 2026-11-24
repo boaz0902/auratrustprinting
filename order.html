@@ -1,94 +1,118 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Upload your print files, review options, and place a printing order with AuraTrust.">
-  <meta property="og:type" content="website"><meta property="og:title" content="Place an Order | AuraTrust Printing & Digital Services"><meta property="og:description" content="Upload files and choose your printing options with AuraTrust."><meta property="og:image" content="assets/logos2.png">
-  <title>Place an Order | AuraTrust Printing & Digital Services</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="description" content="Request a print quote from AuraTrust Printing & Digital Services.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Request a Quote | AuraTrust Printing & Digital Services">
+  <meta property="og:description" content="Share your files and print requirements with AuraTrust.">
+  <meta property="og:image" content="assets/logos2.png">
+  <title>Request a Quote | AuraTrust Printing & Digital Services</title>
   <link rel="icon" type="image/png" href="assets/logos2.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <script>tailwind={config:{theme:{extend:{colors:{brand:{blue:"#2F6FED",indigo:"#3B3FD1",aqua:"#8FE0E3",slate:"#38434E",paper:"#F6F9FE"}},fontFamily:{heading:["Sora","sans-serif"],sans:["Inter","sans-serif"]}}}}};</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.3.3/dist/docx-preview.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css"><script type="module" src="js/order.js"></script>
+  <link rel="stylesheet" href="css/styles.css">
+  <script type="module" src="js/order.js"></script>
 </head>
 <body>
-  <header class="site-header"><nav class="nav-shell" aria-label="Main navigation">
-    <a class="brand-lockup" href="index.html"><span class="brand-mark-crop"><img src="assets/logos2.png" alt=""></span><span class="brand-wordmark"><strong>AURATRUST</strong><small>PRINTING &amp; DIGITAL SERVICES</small></span></a>
-    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-nav" aria-label="Open navigation"><span></span><span></span></button>
-    <div class="nav-links" id="primary-nav"><a href="track.html">Track Order</a><a href="index.html">Price List</a></div>
-  </nav></header>
+  <header class="site-header">
+    <nav class="nav-shell" aria-label="Main navigation">
+      <a class="brand-lockup" href="index.html">
+        <span class="brand-mark-crop"><img src="assets/logos2.png" alt=""></span>
+        <span class="brand-wordmark"><strong>AURATRUST</strong><small>PRINTING &amp; DIGITAL SERVICES</small></span>
+      </a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-nav" aria-label="Open navigation"><span></span><span></span></button>
+      <div class="nav-links" id="primary-nav"><a href="track.html">Track Order</a><a href="index.html#prices">Price List</a></div>
+    </nav>
+  </header>
   <main class="order-main">
     <div class="order-shell">
-      <div class="order-heading"><a class="order-back-link" href="index.html">← Back to price list</a><p class="eyebrow">AuraTrust · Online order</p><h1>Bring your files to life.</h1></div>
-      <div class="wizard-progress" aria-label="Order progress"><div class="progress-track"><div id="progress-bar"></div></div><ol><li class="active" data-step="1"><span>1</span>Upload</li><li data-step="2"><span>2</span>Preview</li><li data-step="3"><span>3</span>Payment</li><li data-step="4"><span>4</span>Confirm</li></ol></div>
+      <div class="order-heading">
+        <a class="order-back-link" href="index.html#prices">← Back to price list</a>
+        <p class="eyebrow">AuraTrust · Request a quote</p>
+        <h1>Thoughtfully made, your way.</h1>
+      </div>
+      <nav class="wizard-progress" aria-label="Request progress">
+        <div class="progress-track"><div id="progress-bar"></div></div>
+        <ol>
+          <li class="active" data-step="1" aria-current="step"><span>1</span>Upload</li>
+          <li data-step="2"><span>2</span>Services</li>
+          <li data-step="3"><span>3</span>Details</li>
+          <li data-step="4"><span>4</span>Done</li>
+        </ol>
+      </nav>
       <section class="wizard-step" data-panel="1" aria-labelledby="upload-title">
-        <h2 id="upload-title">Upload your files</h2>
-        <p class="step-copy">Add up to 10 files, 25 MB each. We accept PDF, Word, Excel, PowerPoint, images, and text files.</p>
-        <p id="order-service-error" class="form-message error" role="alert" hidden>Price information is not available yet. Please try again later.</p>
-        <label id="drop-zone" class="drop-zone" for="file-input" tabindex="0" aria-label="Drop files or browse for files"><div class="drop-icon" aria-hidden="true">↑</div><strong>Drop files here</strong><span>or <u>Browse files</u></span></label>
-        <button id="browse-files" class="button button-outline browse-files-button" type="button">Choose files</button>
-        <input id="file-input" class="file-input-native" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt">
-        <div id="upload-error" class="form-message error" role="alert"></div><div id="file-list" class="file-list"></div>
-        <div class="step-actions"><button id="upload-next" class="button button-gradient" type="button" disabled>Continue to preview →</button></div>
-      </section>
-      <section class="wizard-step" data-panel="2" hidden>
-        <div class="step-two-heading">
-          <div><p class="eyebrow">File review</p><h2>Preview &amp; options</h2><p class="preview-intro">Review each page, then choose the paper and print finish that feels right.</p></div>
-          <span class="step-count" id="step-file-count">0 files</span>
+        <p class="order-kicker">01 · Upload</p>
+        <h2 id="upload-title">Share the files for your project.</h2>
+        <p class="step-copy" id="upload-limits">Add your files to get started. Our staff will review them and confirm the final price.</p>
+        <div id="drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Drop files here or choose files">
+          <span class="drop-zone-mark" aria-hidden="true">↑</span>
+          <strong>Drop your files here</strong>
+          <span>Any file type is welcome</span>
+          <span class="drop-zone-formats">Documents · images · design files · and more</span>
         </div>
-        <div id="preview-step2" class="preview-step2"></div>
-        <div class="step2-sticky-summary" aria-label="Preview summary"><button class="at-btn at-btn-secondary" type="button" data-back="1">← Back</button><div class="step2-summary-meta"><span id="step2-file-count">0 files</span><strong id="mobile-live-total">₱0.00</strong></div><button id="options-next" class="at-btn at-btn-primary" type="button">Continue to payment <span aria-hidden="true">→</span></button></div>
+        <input id="file-input" class="file-input-native" type="file" multiple aria-label="Choose files to upload">
+        <button id="browse-files" class="button button-outline browse-files-button" type="button">Browse files</button>
+        <div id="upload-error" class="form-message error" role="alert" aria-live="polite"></div>
+        <div class="file-list-heading"><span>Your selection</span><span id="file-count" aria-live="polite">0 files</span></div>
+        <div id="file-list" class="file-list" aria-live="polite"></div>
+        <div class="step-actions"><button id="upload-next" class="button button-gradient" type="button" disabled>Choose services <span aria-hidden="true">→</span></button></div>
       </section>
-      <section class="wizard-step" data-panel="3" hidden>
-        <h2>Summary & GCash payment</h2>
-        <div class="checkout-grid"><div>
-          <div id="order-summary" class="order-summary"></div>
-          <div class="payment-card"><h3>Pay with GCash</h3><img id="gcash-qr" src="assets/gcash-qr.png" alt="AuraTrust GCash QR code" loading="lazy" decoding="async"><p><strong id="gcash-name"></strong><br><span id="gcash-number"></span></p><strong id="gcash-exact" class="exact-amount"></strong><a id="download-qr" class="button button-outline" href="assets/gcash-qr.png" download>Download QR</a></div>
-        </div><form id="payment-form" class="payment-form">
-          <label class="order-field"><span>Customer name *</span><input name="customerName" maxlength="120" required autocomplete="name"></label>
-          <label class="order-field"><span>Mobile number *</span><input name="mobile" maxlength="30" required inputmode="tel" autocomplete="tel"></label>
-          <label class="order-field"><span>Pickup or delivery *</span><select name="pickupOrDelivery" required><option value="">Choose an option</option><option>Pickup</option><option>Delivery</option></select></label>
-          <label class="order-field"><span>GCash reference number *</span><input name="gcashRef" maxlength="80" required></label>
-          <label class="order-field"><span>Payment receipt screenshot *</span><input name="receipt" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" required></label>
-          <label class="terms-check"><input id="terms-checkbox" type="checkbox" required><span>I agree to the <a href="terms.html" target="_blank" rel="noopener">Order Terms and Refund Policy</a>, and I allow AuraTrust Printing &amp; Digital Services to use my uploaded files and contact details to process my order. (<a href="terms.html" target="_blank" rel="noopener">Read the Terms</a> | <a href="privacy.html" target="_blank" rel="noopener">Read the Privacy Notice</a>)</span></label>
-          <div id="payment-error" class="form-message error" role="alert" aria-live="polite"></div>
-          <div id="submission-progress" class="file-list" aria-live="polite" hidden></div>
-          <button id="place-order" class="button button-gradient" type="submit" disabled>Place Order →</button>
-        </form></div>
-        <div class="step-actions"><button class="button button-outline" type="button" data-back="2">← Back</button></div>
+
+      <section class="wizard-step" data-panel="2" aria-labelledby="services-title" hidden>
+        <p class="order-kicker">02 · Services</p>
+        <h2 id="services-title">Choose what you have in mind.</h2>
+        <p class="step-copy">Options are matched to each file type. Every amount is an estimate; our staff will confirm the final price.</p>
+        <div id="service-guide-list" class="service-guide-list"></div>
+        <div id="service-guide-empty" class="empty-state" hidden><strong>Custom job</strong><p>Our staff will review your file and quote you. You can leave a note and continue.</p></div>
+        <div id="service-guide-error" class="form-message error" role="alert" aria-live="polite"></div>
+        <div class="step-actions split">
+          <button id="services-back" class="button button-outline" type="button">← Back to upload</button>
+          <button id="services-next" class="button button-gradient" type="button">Your details <span aria-hidden="true">→</span></button>
+        </div>
       </section>
-      <section class="wizard-step" data-panel="4" hidden>
-        <div class="confirmation-card"><div class="confirmation-icon">✓</div><p class="eyebrow">Order received</p><h2>Thank you!</h2><p>Your order has been submitted. We will verify the GCash payment and begin checking your print details.</p><div class="order-number"><span>Order number</span><strong id="confirmed-number"></strong></div><a id="track-order-link" class="button button-gradient" href="track.html">Track my order →</a></div>
+
+      <section class="wizard-step" data-panel="3" aria-labelledby="details-title" hidden>
+        <p class="order-kicker">03 · Details</p>
+        <h2 id="details-title">Where can we reach you?</h2>
+        <form id="customer-details-form" class="customer-details" novalidate>
+          <label class="order-field"><span>Your name <b aria-hidden="true">*</b></span><input name="customerName" maxlength="120" minlength="2" required autocomplete="name"></label>
+          <label class="order-field"><span>Contact number <b aria-hidden="true">*</b></span><input name="mobile" maxlength="24" required inputmode="tel" autocomplete="tel" aria-describedby="mobile-help"><small id="mobile-help">Use a Philippine mobile number, such as 09XXXXXXXXX or +639XXXXXXXXX.</small></label>
+          <label class="order-field"><span>Preferred contact method <b aria-hidden="true">*</b></span><select name="contactMethod" required><option value="">Choose one</option><option>Messenger</option><option>Viber</option><option>WhatsApp</option><option>SMS</option><option>Email</option></select></label>
+          <label class="order-field"><span>Messenger / email handle <small>(optional)</small></span><input name="contactHandle" maxlength="160" autocomplete="email"></label>
+          <label class="order-field"><span>Pickup or delivery <b aria-hidden="true">*</b></span><select name="pickupOrDelivery" required><option value="">Choose one</option><option>Pickup</option><option>Delivery</option></select></label>
+          <label class="order-field"><span>Preferred pickup date <small>(optional)</small></span><input name="preferredPickupDate" type="date"></label>
+          <label class="order-field field-wide"><span>Notes / special instructions <small>(optional)</small></span><textarea name="customerNotes" maxlength="1000" rows="3" placeholder="Anything else we should know?"></textarea></label>
+          <label class="honeypot" aria-hidden="true">Leave this field empty<input name="website" tabindex="-1" autocomplete="off"></label>
+          <div class="review-summary-wrap field-wide">
+            <h3>Review your request</h3>
+            <div id="review-summary" class="review-summary"></div>
+            <p class="estimate-disclaimer">Estimated. Final price confirmed by our staff.</p>
+          </div>
+          <label class="consent-check field-wide"><input name="consent" type="checkbox" required><span>I agree that AuraTrust may contact me about this order and store my files and details for processing. <a href="privacy.html" target="_blank" rel="noopener">Read our short privacy note</a>.</span></label>
+          <div id="details-error" class="form-message error field-wide" role="alert" aria-live="polite"></div>
+          <div class="step-actions split field-wide">
+            <button id="details-back" class="button button-outline" type="button">← Back to services</button>
+            <button id="submit-order" class="button button-gradient" type="submit">Send quote request <span aria-hidden="true">→</span></button>
+          </div>
+        </form>
+      </section>
+
+      <section class="wizard-step" data-panel="4" aria-labelledby="confirmation-title" hidden>
+        <div class="confirmation-card">
+          <div class="confirmation-icon" aria-hidden="true">✓</div>
+          <p class="eyebrow">Request received</p>
+          <h2 id="confirmation-title">Thank you.</h2>
+          <p>Our staff will message you with the final price and payment details. Your files will be reviewed before anything is printed.</p>
+          <div class="order-number"><span>Order reference</span><strong id="confirmed-number"></strong></div>
+          <a id="track-order-link" class="button button-gradient" href="track.html">Track your order →</a>
+        </div>
       </section>
     </div>
   </main>
-  <div id="preview-fullscreen" class="fullscreen-modal" role="dialog" aria-modal="true" aria-label="Fullscreen document preview">
-    <div class="fullscreen-sheet" id="fullscreen-sheet">
-      <div class="fullscreen-toolbar" aria-label="Fullscreen preview controls">
-        <div class="preview-toolbar-group">
-          <button class="at-icon-btn" type="button" data-preview-action="zoom-out" aria-label="Zoom out">−</button>
-          <span id="fullscreen-zoom-label" class="zoom-label">100%</span>
-          <button class="at-icon-btn" type="button" data-preview-action="zoom-in" aria-label="Zoom in">+</button>
-          <button class="at-icon-btn" type="button" data-preview-action="fit" aria-label="Fit preview">Fit</button>
-        </div>
-        <div class="preview-toolbar-group pdf-only">
-          <button class="at-icon-btn" type="button" data-preview-action="previous" aria-label="Previous page">←</button>
-          <span id="fullscreen-page-label" class="page-label">Page 1</span>
-          <button class="at-icon-btn" type="button" data-preview-action="next" aria-label="Next page">→</button>
-        </div>
-        <button class="at-icon-btn fullscreen-close" type="button" data-preview-action="close-fullscreen" aria-label="Close fullscreen preview">×</button>
-      </div>
-      <div id="fullscreen-paper-stage" class="fullscreen-paper-stage">
-        <div id="fullscreen-paper" class="preview-sheet fullscreen-paper" data-paper="short"></div>
-      </div>
-    </div>
-  </div>
 </body>
 </html>

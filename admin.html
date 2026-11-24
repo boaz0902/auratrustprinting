@@ -93,7 +93,17 @@
         </section>
         </div>
         <section id="orders-panel" role="tabpanel" aria-labelledby="orders-tab" data-admin-panel="orders" hidden>
-          <div class="service-manager"><div class="orders-toolbar"><div><p class="admin-kicker">Customer orders</p><h2>All orders</h2></div><div class="orders-controls"><label>Status <select id="order-status-filter"><option value="All">All</option><option>Received</option><option>Payment Checking</option><option>Paid</option><option>Printing</option><option>Ready for Pickup</option><option>Completed</option></select></label><button id="refresh-orders" class="button button-outline" type="button">Refresh orders</button><button id="delete-old-files" class="button button-outline danger-button" type="button">Delete files older than 30 days</button></div></div><div id="orders-list"></div></div>
+          <div class="service-manager">
+            <div class="orders-toolbar">
+              <div><p class="admin-kicker">Customer orders</p><h2>All orders</h2><p class="admin-export-note">Export orders weekly and keep the CSV in your business records.</p></div>
+              <div class="orders-controls">
+                <label>Status <select id="order-status-filter"><option value="All">All</option><option>New</option><option>Quoted</option><option>Awaiting payment</option><option>Paid</option><option>Printing</option><option>Ready for pickup</option><option>Completed</option><option>Cancelled</option></select></label>
+                <button id="refresh-orders" class="button button-outline" type="button">Refresh orders</button>
+                <button id="export-orders" class="button button-outline" type="button">Export CSV</button>
+              </div>
+            </div>
+            <div id="orders-list"></div>
+          </div>
         </section>
       </section>
     </main>

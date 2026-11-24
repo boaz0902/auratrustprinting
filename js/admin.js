@@ -1,6 +1,5 @@
 import { isSupabaseConfigured } from "./supabase.js";
 import {
-  deleteOldOrderFiles,
   getAllOrders,
   getAllServices,
   getSignedUrl,
@@ -9,6 +8,7 @@ import {
   saveService,
   signInAdmin,
   signOutAdmin,
+  updateOrderQuote,
   updateOrderStatus
 } from "./supabase.js";
 
@@ -21,7 +21,7 @@ const serviceForm = document.querySelector("#service-form");
 const tableBody = document.querySelector("#services-table-body");
 const toast = document.querySelector("#toast");
 const currency = new Intl.NumberFormat("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const statuses = ["Received", "Payment Checking", "Paid", "Printing", "Ready for Pickup", "Completed"];
+const statuses = ["New", "Quoted", "Awaiting payment", "Paid", "Printing", "Ready for pickup", "Completed", "Cancelled"];
 let services = [];
 let orders = [];
 let toastTimeout;
@@ -48,10 +48,14 @@ function showToast(message, isError = false) {
 function priceSummary(service) {
   const variants = Array.isArray(service.variants) ? service.variants : [];
   if (variants.length) {
-    const prices = variants.map((variant) => Number(variant.price)).filter(Number.isFinite);
-    return prices.length ? `From ₱${currency.format(Math.min(...prices))}` : "Variants";
+    const prices = variants.map((variant) => variant.price)
+      .filter((price) => price !== null && price !== undefined && price !== "")
+      .map(Number).filter(Number.isFinite);
+    return prices.length ? `From ₱${currency.format(Math.min(...prices))}` : "Staff will quote";
   }
-  return Number.isFinite(Number(service.price)) ? `₱${currency.format(Number(service.price))}` : "—";
+  return service.price !== null && service.price !== undefined && service.price !== "" && Number.isFinite(Number(service.price))
+    ? `₱${currency.format(Number(service.price))}`
+    : "Staff will quote";
 }
 
 function renderServices() {
@@ -237,18 +241,50 @@ function renderOrders() {
   orderList.innerHTML = filtered.map((order) => `
     <article class="order-card">
       <div class="order-card-head">
-        <div><h3>${escapeHtml(order.order_number)}</h3><p class="order-card-meta">${escapeHtml(order.customer_name)} · ${escapeHtml(order.mobile)} · ${escapeHtml(order.pickup_or_delivery)} · ${escapeHtml(formatOrderDate(order.created_at))}</p></div>
+        <div><h3>${escapeHtml(order.order_number)}</h3><p class="order-card-meta">${escapeHtml(order.customer_name)} · ${escapeHtml(order.mobile)} · ${escapeHtml(order.contact_method || "Contact method not set")} · ${escapeHtml(order.contact_handle || "")}<br>${escapeHtml(order.pickup_or_delivery)}${order.preferred_pickup_date ? ` · Preferred date ${escapeHtml(order.preferred_pickup_date)}` : ""} · ${escapeHtml(formatOrderDate(order.created_at))}</p></div>
         <label class="sr-only" for="status-${escapeHtml(order.id)}">Order status</label>
         <select id="status-${escapeHtml(order.id)}" class="order-status-select" data-order-status="${escapeHtml(order.id)}" aria-label="Change status for ${escapeHtml(order.order_number)}">${statuses.map((status) => `<option ${status === order.status ? "selected" : ""}>${status}</option>`).join("")}</select>
       </div>
       <div class="order-items">${(Array.isArray(order.items) ? order.items : []).map((item) => `
-        <div class="order-item-row"><strong>${escapeHtml(item.fileName || "Order file")}</strong><span>${escapeHtml(item.options?.service || "Service")} · ${escapeHtml(item.options?.paper || "A4")} · ${escapeHtml(item.options?.copies || 1)} copy · ${escapeHtml(item.options?.color || "")} · ${escapeHtml(item.options?.pages || "All")}</span>
+        <div class="order-item-row"><div><strong>${escapeHtml(item.fileName || "Order file")}</strong><span>${(Array.isArray(item.selections) ? item.selections : []).map((selection) => `${escapeHtml(selection.serviceName)} · ${escapeHtml(selection.optionLabel)} · ${escapeHtml(selection.quantity)} × ${escapeHtml(selection.unit)}${selection.pages ? ` · ${escapeHtml(selection.pages)} pages` : ""}`).join("<br>") || "Staff quote requested"}${item.notes ? `<br>File note: ${escapeHtml(item.notes)}` : ""}</span></div>
         ${item.storagePath ? `<button class="text-button" type="button" data-open-file="${escapeHtml(item.storagePath)}">Open / download</button>` : "<span>File removed</span>"}</div>
       `).join("")}</div>
-      <p class="order-card-meta">GCash ref: ${escapeHtml(order.gcash_ref)} · Estimated total: ₱${currency.format(Number(order.estimated_total || 0))}</p>
-      ${order.receipt_path ? `<div class="order-admin-actions"><button class="button button-outline" type="button" data-open-receipt="${escapeHtml(order.receipt_path)}">View receipt</button></div>` : '<p class="order-card-meta">Receipt file removed.</p>'}
+      <p class="order-card-meta">Estimated: ${order.estimated_total == null ? "Staff quote required" : `₱${currency.format(Number(order.estimated_total))}`} · Final: ${order.final_total == null ? "Not quoted" : `₱${currency.format(Number(order.final_total))}`}</p>
+      ${order.customer_notes ? `<p class="order-customer-notes"><strong>Customer notes:</strong> ${escapeHtml(order.customer_notes)}</p>` : ""}
+      ${order.internal_note ? `<p class="order-internal-note"><strong>Internal note:</strong> ${escapeHtml(order.internal_note)}</p>` : ""}
+      <div class="order-quote-editor">
+        <label class="admin-field"><span>Final price (₱)</span><input type="number" min="0.01" step="0.01" inputmode="decimal" value="${order.final_total == null ? "" : escapeHtml(order.final_total)}" data-final-price="${escapeHtml(order.id)}"></label>
+        <label class="admin-field"><span>Internal note</span><textarea rows="2" maxlength="1000" data-internal-note="${escapeHtml(order.id)}">${escapeHtml(order.internal_note || "")}</textarea></label>
+        <div class="order-admin-actions">
+          <button class="button button-outline" type="button" data-save-quote="${escapeHtml(order.id)}">Save final price</button>
+          <button class="button button-outline" type="button" data-copy-message="${escapeHtml(order.id)}">Copy message</button>
+        </div>
+      </div>
     </article>
   `).join("");
+}
+
+function csvCell(value) {
+  const raw = String(value ?? "");
+  const text = /^[\s]*[=+\-@]/.test(raw) ? `'${raw}` : raw;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function exportOrders() {
+  const header = ["Order reference", "Created", "Status", "Customer", "Mobile", "Contact method", "Contact handle", "Pickup or delivery", "Preferred pickup date", "Estimated total", "Final total", "Customer notes", "Internal note", "Files"];
+  const rows = orders.map((order) => [
+    order.order_number, order.created_at, order.status, order.customer_name, order.mobile,
+    order.contact_method, order.contact_handle, order.pickup_or_delivery, order.preferred_pickup_date,
+    order.estimated_total, order.final_total, order.customer_notes, order.internal_note,
+    (Array.isArray(order.items) ? order.items : []).map((item) => `${item.fileName || ""}: ${(Array.isArray(item.selections) ? item.selections : []).map((selection) => selection.serviceName).join(", ")}`).join(" | ")
+  ]);
+  const csv = [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
+  const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `auratrust-orders-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 async function loadOrders() {
@@ -295,21 +331,7 @@ document.querySelectorAll("[data-admin-tab]").forEach((tab) => tab.addEventListe
 
 document.querySelector("#order-status-filter").addEventListener("change", renderOrders);
 document.querySelector("#refresh-orders").addEventListener("click", loadOrders);
-document.querySelector("#delete-old-files").addEventListener("click", async (event) => {
-  const button = event.currentTarget;
-  if (!window.confirm("Delete order files from orders older than 30 days? This cannot be undone.")) return;
-  button.disabled = true;
-  try {
-    const result = await deleteOldOrderFiles(orders);
-    showToast(`Removed ${result.files} file(s) from ${result.orders} old order(s).`);
-    await loadOrders();
-  } catch (error) {
-    console.error("Unable to delete old order files.", error);
-    showToast("Could not finish file cleanup. Check storage and orders row-level security.", true);
-  } finally {
-    button.disabled = false;
-  }
-});
+document.querySelector("#export-orders").addEventListener("click", exportOrders);
 
 document.querySelector("#orders-list").addEventListener("change", async (event) => {
   const select = event.target.closest("[data-order-status]");
@@ -328,15 +350,61 @@ document.querySelector("#orders-list").addEventListener("change", async (event) 
 });
 
 document.querySelector("#orders-list").addEventListener("click", async (event) => {
+  const quoteButton = event.target.closest("[data-save-quote]");
+  if (quoteButton) {
+    const orderId = quoteButton.dataset.saveQuote;
+    const priceInput = document.querySelector(`[data-final-price="${CSS.escape(orderId)}"]`);
+    const noteInput = document.querySelector(`[data-internal-note="${CSS.escape(orderId)}"]`);
+    const price = Number(priceInput.value);
+    if (!priceInput.value || !Number.isFinite(price) || price <= 0) {
+      showToast("Enter a final price greater than zero.", true);
+      priceInput.focus();
+      return;
+    }
+    quoteButton.disabled = true;
+    try {
+      const order = orders.find((item) => item.id === orderId);
+      const nextStatus = order?.status === "New" ? "Quoted" : order?.status || "Quoted";
+      await updateOrderQuote(orderId, price, noteInput.value.trim(), nextStatus);
+      if (order) {
+        order.final_total = price;
+        order.internal_note = noteInput.value.trim() || null;
+        order.status = nextStatus;
+      }
+      renderOrders();
+      showToast("Final price saved and order marked Quoted.");
+    } catch (error) {
+      console.error("Unable to save the final quote.", error);
+      showToast("Could not save the final price. Check your connection and order permissions.", true);
+    } finally {
+      quoteButton.disabled = false;
+    }
+    return;
+  }
+  const copyButton = event.target.closest("[data-copy-message]");
+  if (copyButton) {
+    const order = orders.find((item) => item.id === copyButton.dataset.copyMessage);
+    if (!order) return;
+    const customer = order.customer_name || "there";
+    const price = order.final_total == null ? "Our staff is preparing your final price." : `Final price: ₱${currency.format(Number(order.final_total))}.`;
+    const message = `Hi ${customer}, AuraTrust has an update on your print request ${order.order_number}. ${price} We will confirm the next steps and payment details with you. Thank you!`;
+    try {
+      await navigator.clipboard.writeText(message);
+      showToast("Ready-to-send quote message copied.");
+    } catch (error) {
+      console.error("Unable to copy the quote message.", error);
+      showToast("Could not copy the message. Check browser clipboard permission.", true);
+    }
+    return;
+  }
   const fileButton = event.target.closest("[data-open-file]");
-  const receiptButton = event.target.closest("[data-open-receipt]");
-  const button = fileButton || receiptButton;
+  const button = fileButton;
   if (!button) return;
   button.disabled = true;
   const popup = window.open("about:blank", "_blank");
   if (popup) popup.opener = null;
   try {
-    const url = await getSignedUrl(button.dataset.openFile || button.dataset.openReceipt);
+    const url = await getSignedUrl(button.dataset.openFile);
     if (!popup) throw new Error("The browser blocked the new tab.");
     popup.location.href = url;
   } catch (error) {

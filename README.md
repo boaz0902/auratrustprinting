@@ -1,71 +1,95 @@
 # AuraTrust Printing & Digital Services
 
-A static, mobile-first business website built with HTML, CSS, vanilla JavaScript ES modules, and Tailwind CSS from its CDN. Supabase provides authentication, database access, order tracking, and private file storage. Vercel serves the static files; no build step or server-side secret is required.
+A mobile-first static website built with HTML, CSS, vanilla JavaScript ES modules, and Tailwind CSS from its CDN. Vercel serves the site; Supabase provides authentication, the live service catalog, order records, and private file storage.
 
 ## Run locally
 
-Serve this folder over HTTP (ES modules do not work from `file://`). For example:
+Serve this folder over HTTP (ES modules do not work from `file://`):
 
 ```powershell
 python -m http.server 8000
 ```
 
-Then open `http://localhost:8000`.
+Then open `http://localhost:8000`. On Windows, `start-local.bat` starts the site on `http://127.0.0.1:8765/`.
 
-On Windows, you can also double-click `start-local.bat`. It starts the static site on `http://127.0.0.1:8765/` and opens Chrome automatically. Keep the terminal window open while testing.
+## Supabase setup
 
-## Configure Supabase
+1. Set the public Supabase URL and publishable/anon key in `js/config.js`. Never put a service-role key in browser code.
+2. Keep the existing `services`, `orders`, `admins`, and private `order-files` bucket. Public prices and the order guide both use visible rows in `services`; maintain prices in `admin.html`.
+3. Apply `supabase/migrations/20261124_quote_request_flow.sql` to the existing database. It adds quote/contact fields, readable order references, the quote-creation and tracking RPCs, status timestamps, and storage-bucket file limits.
+4. Configure `order-files` as a private bucket that allows uploads under `{auth-user-id}/{order-id}/...`; the migration removes MIME-type filtering and sets a 10 MB per-object limit. The site also caps a request at 10 files and 40 MB total in `js/config.js`.
+5. Enable Supabase Anonymous Sign-Ins for customers and Email sign-in for the owner. Keep the existing admin-only read/update policies for orders and storage. The quote RPC verifies the authenticated customer ID and uploaded file paths.
+6. Make sure `services` permits public reads only for visible rows and the admin account is authorized in `admins`.
 
-1. In `js/config.js`, set `SUPABASE_URL` to the Supabase project URL and `SUPABASE_ANON_KEY` to the project's **public anon/publishable key**. These values are intended for browser use. Never put a `service_role` key in this project.
-2. Update the contact details in `businessInfo` and the GCash name/number in `gcashInfo`. Replace `assets/gcash-qr.png` with the business QR code before accepting orders.
-3. Use the existing `services`, `orders`, and `admins` tables, row-level security policies, `track_order` RPC, and private `order-files` bucket. This site does not create or alter the database schema.
-4. In Supabase Authentication, enable **Anonymous Sign-Ins** for customers and **Email** sign-in for the owner.
-5. Create the owner's email/password user in **Authentication → Users**, then authorize that user's Auth ID in the existing `admins` table using its preconfigured schema and policies.
-6. Confirm RLS permits public reads only for visible services; authorized admins to manage services and orders; anonymous customers to upload into their own `{auth-user-id}/{order-id}/...` folder; and admins to read/delete order files. The private bucket's 25 MB file limit and accepted content types should match `js/config.js`.
-7. The order tracker calls `track_order` with named arguments `p_order_number` and `p_mobile`. Confirm the existing RPC uses those names and returns the matching order number and status.
+The order wizard accepts any file extension. `fileTypeCategories` in `js/config.js` is the single extension-to-category map; unknown extensions receive the custom-job guide. Service names, variants, and prices come from Supabase. Missing catalog prices display **Staff will quote**. Every estimate is informational; staff sets the final price in Admin.
 
-### Data used by the pages
+## Configure automatic file cleanup
 
-- `services`: `id`, `name`, `category`, `description`, `unit`, `price`, `variants`, `popular`, `visible`, `sort_order`, `updated_at`.
-- `orders`: `id`, `order_number`, `customer_id`, `customer_name`, `mobile`, `pickup_or_delivery`, `items`, `estimated_total`, `gcash_ref`, `receipt_path`, `status`, `terms_accepted_at`, `created_at`.
-- `items` is JSON containing each original file name, private storage path, file metadata, and the selected print options.
+The cleanup Edge Function deletes files only after an order has remained **Completed** or **Cancelled** for the configured retention period. It preserves the order row and selections while clearing the file storage paths. The default is 30 days.
 
-If price loading fails or no visible service is available, the public price page and order form use the clearly identified placeholder services in `js/sample-data.js`. Replace those sample amounts before launch.
+1. Deploy `supabase/functions/cleanup-order-files/index.ts` with the Supabase CLI:
 
-## Create and deploy the admin
+   ```powershell
+   supabase functions deploy cleanup-order-files --no-verify-jwt
+   supabase secrets set FILE_RETENTION_DAYS=30
+   ```
 
-1. Create an Auth user with a strong email/password in the Supabase dashboard.
-2. Add its Auth user ID to the existing `admins` table as required by that table's schema and RLS setup.
-3. Open `admin.html`, sign in, and use **Prices** to add and maintain services. The same dashboard has **Orders**, status updates, signed file links, and the 30-day file cleanup action.
+   Set `FILE_RETENTION_DAYS` to a whole number from 1 to 3650 to change the retention period.
+2. In Supabase, enable the Cron, Net, and Vault extensions. Store the service-role key in Vault (never in the repository or Vercel):
+
+   ```sql
+   select vault.create_secret('<service-role-key>', 'order_cleanup_service_role_key');
+   ```
+3. Create a daily Cron job (for example, 03:15 UTC) that invokes the function using the secret stored in Vault:
+
+   ```sql
+   select cron.schedule(
+     'delete-order-files-daily',
+     '15 3 * * *',
+     $$
+     select net.http_post(
+       url := 'https://<project-ref>.supabase.co/functions/v1/cleanup-order-files',
+       headers := jsonb_build_object(
+         'Content-Type', 'application/json',
+         'Authorization', 'Bearer ' || (
+           select decrypted_secret
+           from vault.decrypted_secrets
+           where name = 'order_cleanup_service_role_key'
+         )
+       ),
+       body := '{}'::jsonb
+     );
+     $$
+   );
+   ```
+
+   Do not put the key in this file or commit it.
+
+The function responds with the number of orders processed and files deleted. Review its Edge Function logs periodically.
+
+## Admin and weekly order export
+
+Open `admin.html` and sign in with the authorized owner account. The Orders tab shows customer contact details, service selections, order notes, estimates, and time-limited download links. Staff can set the final price, add an internal note, copy a ready-to-send message, and move orders through New, Quoted, Awaiting payment, Paid, Printing, Ready for pickup, Completed, or Cancelled.
+
+Use **Export CSV** from the Orders tab once a week and keep the downloaded file with business records. Do not store exports in a publicly accessible folder.
+
+## Free-tier reliability
+
+Supabase Free projects can pause after a period of inactivity. A scheduled keep-alive ping is not a dependable substitute for a production plan. Check the project and backups regularly, keep a weekly CSV export, and use a paid Supabase plan if the order service must remain continuously available.
 
 ## Deploy to Vercel
 
-1. Push the project to a Git repository and import it in Vercel using the **Other** framework preset. No build command or output directory is needed.
-2. Deploy the site as a static project.
-3. In Supabase **Authentication → URL Configuration**, set the production Vercel URL as the Site URL and add it, plus any preview/local origins you use, to the Redirect URLs list.
-4. Open the production domain and test the public price list, admin login, an anonymous customer order, and order tracking.
+1. Import the repository in Vercel using the **Other** framework preset. No build command or output directory is required.
+2. Set the production site URL in Supabase Authentication → URL Configuration and allow the production and local origins.
+3. Test the public price list, order request, admin workflow, file cleanup schedule, and order tracking against a staging Supabase project before switching customers to the new flow.
 
 ## Project map
 
-- `index.html` — public price list, contact details, and business information.
-- `order.html` — four-step file, preview/options, payment, and order flow.
-- `track.html` — RPC-based order tracking.
-- `admin.html` — email/password access, price management, and order management.
-- `terms.html` / `privacy.html` — branded legal content pages.
-- `js/config.js` — Supabase public settings, business/GCash details, and file limits.
-- `js/supabase.js` — Supabase client and shared data/auth/storage helpers.
-- `js/sample-data.js` — clearly identified fallback prices.
-- `css/styles.css` — shared responsive styles and reduced-motion behavior.
-
-Orders accept up to 10 print files, 25 MB each: PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, JPG/JPEG, PNG, WebP, or TXT. The receipt screenshot must be a JPG, PNG, or WebP image and is stored alongside the order files.
-
-## Preview and print-option linking
-
-Step 2 uses the `paper_size`, `color_mode`, and `file_kinds` fields from the `services` table. Supported paper sizes are `short`, `a4`, `long`, and `a3`. Supported color modes are `color` and `bw`.
-
-- Upload detection suggests a service and initial paper/color values. Every suggestion is shown with a **Suggested** chip and can be changed.
-- Choosing a service automatically applies that service's paper size and color mode.
-- Changing paper size or color mode searches for a sibling in the same service category with both matching fields. For example, a Document Printing category entry for A4 in B&W uses its matching sibling rather than keeping an incompatible Legal/A4 combination.
-- If no matching sibling exists, the selection remains visible and is marked **To be confirmed**. It is excluded from the estimate and the customer receives a gentle inline notice that AuraTrust will confirm the price.
-- Paper sizes remain tied to the sheet preview: Short = 8.5 × 11 in, A4 = 8.27 × 11.69 in, Long = 8.5 × 13 in, and A3 = 11.69 × 16.54 in.
-- PDF pages are detected automatically. For non-PDF files, the customer enters or reviews the page range; estimates use the live copies and page-range values.
+- `index.html` — public price list and business information.
+- `order.html` — four-step quote request (upload, services, details, done).
+- `track.html` — order reference and contact-number tracking.
+- `admin.html` — price management and order/quote management.
+- `js/config.js` — browser-safe Supabase settings, file limits, and extension categories.
+- `js/supabase.js` — shared auth, price, storage, and order helpers.
+- `supabase/migrations/20261124_quote_request_flow.sql` — quote workflow schema and RPCs.
+- `supabase/functions/cleanup-order-files/` — scheduled file-retention function.

@@ -102,20 +102,38 @@ export async function uploadOrderFile(userId, orderId, file, fileName = file.nam
     contentType: file.type || "application/octet-stream",
     upsert: false
   });
-  if (error) throw error;
-  return { path: data.path, fileName: file.name, fileType: file.type, size: file.size };
+  if (error && !(error.code === "Duplicate" || String(error.statusCode) === "409")) throw error;
+  return { path: data?.path || path, fileName: file.name, fileType: file.type, size: file.size };
 }
 
-export async function createCustomerOrder(order) {
-  const { error } = await requireSupabase().from("orders").insert(order);
+export async function createQuoteOrder(order) {
+  const { data, error } = await requireSupabase().rpc("create_quote_order", {
+    p_id: order.id,
+    p_customer_id: order.customerId,
+    p_customer_name: order.customerName,
+    p_mobile: order.mobile,
+    p_contact_method: order.contactMethod,
+    p_contact_handle: order.contactHandle,
+    p_pickup_or_delivery: order.pickupOrDelivery,
+    p_preferred_pickup_date: order.preferredPickupDate,
+    p_customer_notes: order.customerNotes,
+    p_estimated_total: order.estimatedTotal,
+    p_terms_accepted_at: order.termsAcceptedAt,
+    p_items: order.items
+  });
   if (error) throw error;
-  return { id: order.id, order_number: order.order_number };
+  const result = Array.isArray(data) ? data[0] : data;
+  if (!result?.order_number) throw new Error("The order was saved but its reference could not be retrieved. Contact AuraTrust before retrying.");
+  return result;
 }
 
 export async function trackCustomerOrder(orderNumber, mobile) {
-  const { data, error } = await requireSupabase().rpc("track_order", {
+  let normalizedMobile = mobile.replace(/\D/g, "");
+  if (normalizedMobile.startsWith("63")) normalizedMobile = `0${normalizedMobile.slice(2)}`;
+  else if (normalizedMobile.length === 10 && normalizedMobile.startsWith("9")) normalizedMobile = `0${normalizedMobile}`;
+  const { data, error } = await requireSupabase().rpc("track_order_details", {
     p_order_number: orderNumber.trim(),
-    p_mobile: mobile.trim()
+    p_mobile: normalizedMobile
   });
   if (error) throw error;
   const order = Array.isArray(data) ? data[0] : data;
@@ -134,31 +152,17 @@ export async function updateOrderStatus(orderId, status) {
   if (error) throw error;
 }
 
+export async function updateOrderQuote(orderId, finalPrice, internalNote, status) {
+  const { error } = await requireSupabase().from("orders").update({
+    final_total: finalPrice,
+    internal_note: internalNote || null,
+    status
+  }).eq("id", orderId);
+  if (error) throw error;
+}
+
 export async function getSignedUrl(path) {
   const { data, error } = await requireSupabase().storage.from("order-files").createSignedUrl(path, 300);
   if (error) throw error;
   return data.signedUrl;
-}
-
-export async function deleteOldOrderFiles(orders) {
-  const client = requireSupabase();
-  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-  const oldOrders = orders.filter((order) => order.created_at && new Date(order.created_at).getTime() < cutoff);
-  let removed = 0;
-  for (const order of oldOrders) {
-    const items = Array.isArray(order.items) ? order.items : [];
-    const paths = items.map((item) => item.storagePath).filter(Boolean);
-    if (order.receipt_path) paths.push(order.receipt_path);
-    if (paths.length) {
-      const { error } = await client.storage.from("order-files").remove(paths);
-      if (error) throw error;
-    }
-    const { error } = await client.from("orders").update({
-      items: items.map((item) => ({ ...item, storagePath: null })),
-      receipt_path: null
-    }).eq("id", order.id);
-    if (error) throw error;
-    removed += paths.length;
-  }
-  return { orders: oldOrders.length, files: removed };
 }
